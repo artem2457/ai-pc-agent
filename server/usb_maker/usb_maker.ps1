@@ -137,6 +137,11 @@ $write.Add_Click({
       return
     }
     $num = [int]$script:disks[$combo.SelectedIndex].Number
+    $sizeGB = [int]$script:disks[$combo.SelectedIndex].SizeGB
+    if ($sizeGB -lt 8) {
+      [Windows.Forms.MessageBox]::Show("USB is $sizeGB GB. Use an 8 GB or larger flash drive.")
+      return
+    }
     $ok = [Windows.Forms.MessageBox]::Show("Disk $num will be completely erased. Continue?", "Erase USB?", "YesNo")
     if ($ok -ne "Yes") { return }
     Write-Log "Writing... do not remove the USB drive. No ISO required."
@@ -159,7 +164,11 @@ $write.Add_Click({
     if (Test-Path $outFile) { Write-Log (Get-Content $outFile -Raw) }
     if (Test-Path $errFile) { $e = Get-Content $errFile -Raw; if ($e) { Write-Log $e } }
     if ($p.ExitCode -ne 0) {
-      [Windows.Forms.MessageBox]::Show("Write failed. Check the log. Admin rights and WinRE are required on this PC.")
+      $tail = ""
+      if (Test-Path $errFile) { $tail = (Get-Content $errFile -Raw) }
+      if (-not $tail -and (Test-Path $outFile)) { $tail = (Get-Content $outFile -Raw) }
+      if ($tail.Length -gt 900) { $tail = $tail.Substring($tail.Length - 900) }
+      [Windows.Forms.MessageBox]::Show("Write failed.`n`n$tail")
       return
     }
     [Windows.Forms.MessageBox]::Show("USB ready.`n1. Boot empty PC from USB`n2. Connect to the internet`n3. Device appears on the website`n4. Grok will download Windows")
