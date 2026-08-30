@@ -18,9 +18,9 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Открой http://localhost:8000
 
-1. Зарегистрируйся
-2. Создай токен
-3. Для Grok: создай MCP-ключ. Для чата на сайте мозг запасной (встроенный план / OpenAI).
+1. Зарегистрируйся и подключи ПК (токен агента)
+2. Управляй компьютером через **Grok Bot** — MCP настроен на сервере, пользователю ключи не нужны
+3. На сайте — только устройства и лог команд
 
 Чтобы Grok из интернета достучался до MCP, в `.env` поставь публичный адрес:
 
@@ -30,19 +30,13 @@ PUBLIC_URL=https://твой-домен-или-ngrok
 
 И пробрось порт (cloudflared / ngrok / свой VPS). Localhost Grok не увидит.
 
-## Grok Bot (основной мозг — глобально для приложения)
+## Grok Bot
 
-**Мозг — Grok Bot. Руки — агент. JSON команд, не скриншот терминала.**
+Пользователь работает в **Grok Bot**. Сервер отдаёт MCP-инструменты (`/mcp`), Grok вызывает их, агент выполняет на ПК.
 
-1. На сайте: войди — MCP-ключ создаётся автоматически
-2. [grok.com/connectors](https://grok.com/connectors) → Custom
-3. **Server-URL:** `{PUBLIC_URL}/mcp?key=<mcp_key>` (удобно для Grok web UI)
-4. Или URL `{PUBLIC_URL}/mcp` + `Authorization: Bearer <mcp_key>`
-5. Open in Grok → «list_devices» → «execute_command ipconfig на моём ПК»
+Connector настраивается **один раз** администратором (не в UI сайта). См. `.env-server` / deploy docs.
 
-Инструменты: `list_devices`, `get_hardware`, `execute_command`, `read_file`, `write_file`, `upload_file`, `download_file`, `install_package`, `install_os`, `get_processes`, `get_services`, `get_logs`, `reboot`, `shutdown`, `get_screen` (запасной).
-
-Большой stdout обрезается. Полный лог — `get_logs`.
+Инструменты: `list_devices`, `execute_command`, `get_hardware`, … — JSON ответ, не скриншот.
 
 ## Флешка для пустого ПК
 

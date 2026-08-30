@@ -131,8 +131,6 @@ def register(body: AuthIn, db: Session = Depends(get_db)):
     return {
         "token": make_token(user.id),
         "email": user.email,
-        "mcp_url": mcp_public_url(),
-        "mcp_connect_url": mcp_connect_url(mcp_key),
     }
 
 
@@ -147,17 +145,8 @@ def login(body: AuthIn, db: Session = Depends(get_db)):
 
 @app.get("/api/me")
 def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    mcp_key = ensure_mcp_key(db, user.id)
-    return {
-        "email": user.email,
-        "id": user.id,
-        "brain": "grok_mcp",
-        "mcp_url": mcp_public_url(),
-        "mcp_key": mcp_key,
-        "mcp_connect_url": mcp_connect_url(mcp_key),
-        "grok_connectors": "https://grok.com/connectors",
-        "tagline": "Мозг — Grok Bot. Руки — агент. JSON команд, не скриншот терминала.",
-    }
+    ensure_mcp_key(db, user.id)
+    return {"email": user.email, "id": user.id}
 
 
 @app.post("/api/mcp-key")

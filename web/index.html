@@ -9,7 +9,7 @@
 <body>
   <div id="auth" class="card wrap">
     <h1>AI PC Agent</h1>
-    <p class="muted">Мозг — Grok Bot. Руки — агент на ПК. JSON команд, не скриншот терминала.</p>
+    <p class="muted">Подключи ПК и управляй им через <a href="https://grok.com" target="_blank">Grok Bot</a>.</p>
     <input id="email" placeholder="email" />
     <input id="password" type="password" placeholder="пароль" />
     <div class="row">
@@ -22,62 +22,29 @@
   <div id="app" class="hidden">
     <header>
       <strong>AI PC Agent</strong>
-      <span id="tagline" class="muted"></span>
       <span id="who" class="muted"></span>
+      <a class="dl" href="https://grok.com" target="_blank">Open Grok</a>
       <button id="btn-out" class="ghost">Выйти</button>
     </header>
-
-    <section class="hero">
-      <div class="hero-text">
-        <h2>Grok MCP — основной режим</h2>
-        <p class="muted">Grok Bot думает и ищет в своём браузере. Сервер выполняет команды на ПК и возвращает JSON: <code>exit_code</code>, <code>stdout_tail</code>.</p>
-      </div>
-      <div id="mcp-box" class="mcp-card"></div>
-    </section>
 
     <div class="layout">
       <aside>
         <h2>Устройства</h2>
         <div id="devices"></div>
-        <h2>Флешка / токен агента</h2>
+        <h2>Подключить ПК</h2>
         <input id="stick-label" placeholder="USB Agent" />
         <button id="btn-stick">Создать токен</button>
-        <p class="muted">Запусти агент — устройство появится здесь. Grok управляет им через MCP.</p>
+        <p class="muted">Запусти агент на ПК или флешку — устройство появится слева.</p>
         <p><a class="dl" href="/usb-maker.bat">Скачать программу флешки</a></p>
         <div id="sticks"></div>
       </aside>
       <main>
-        <div id="empty" class="muted">Выбери устройство — увидишь лог команд от Grok и агента</div>
+        <div id="empty" class="muted">Выбери устройство — здесь лог команд от Grok</div>
         <div id="panel" class="hidden">
           <h2 id="dev-title"></h2>
           <p id="dev-meta" class="muted"></p>
-          <h3>Лог команд (MCP / агент)</h3>
+          <h3>Лог команд</h3>
           <div id="logs"></div>
-          <details class="fallback">
-            <summary>Запасной чат на сайте (OpenAI, не Grok)</summary>
-            <div id="chat"></div>
-            <div class="row">
-              <input id="msg" placeholder="Установи git и python..." />
-              <button id="btn-send">Отправить</button>
-            </div>
-          </details>
-          <details>
-            <summary>Ручная команда</summary>
-            <select id="action">
-              <option>get_hardware</option>
-              <option>get_system_info</option>
-              <option>install_package</option>
-              <option>run_shell</option>
-              <option>run_powershell</option>
-              <option>install_windows</option>
-              <option>read_file</option>
-              <option>write_file</option>
-              <option>reboot</option>
-              <option>shutdown</option>
-            </select>
-            <input id="params" placeholder='{"name":"git"}' />
-            <button id="btn-cmd">Выполнить</button>
-          </details>
         </div>
       </main>
     </div>

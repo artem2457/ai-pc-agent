@@ -18,13 +18,11 @@ function showApp() {
   $("app").classList.remove("hidden");
   $("who").textContent = localStorage.getItem("email") || "";
   refresh();
-  showMcp();
 }
 
 function showAuth() {
   $("app").classList.add("hidden");
   $("auth").classList.remove("hidden");
-  renderMcpFallback();
 }
 
 async function authSuccess(d) {
@@ -77,7 +75,7 @@ async function refresh() {
           <span class="muted">${d.os} · ${d.status}</span>
         </div>`
     )
-    .join("") || "<p class='muted'>Нет устройств. Создай токен агента и запусти agent.py или флешку.</p>";
+    .join("") || "<p class='muted'>Нет устройств. Создай токен и запусти агент.</p>";
   $("devices").querySelectorAll(".device").forEach((el) => {
     el.onclick = () => openDevice(el.dataset.id);
   });
@@ -106,7 +104,7 @@ async function loadDevice() {
   const d = await api("/api/devices/" + current);
   $("dev-title").textContent = `${d.status === "online" ? "🟢" : "🔴"} ${d.hostname || d.device_id}`;
   const hw = d.hardware || {};
-  $("dev-meta").textContent = `${d.os} · CPU ${hw.cpu || "?"} · RAM ${hw.ram_gb || "?"} GB · Grok → MCP → агент`;
+  $("dev-meta").textContent = `${d.os} · CPU ${hw.cpu || "?"} · RAM ${hw.ram_gb || "?"} GB`;
   const logs = await api("/api/devices/" + current + "/logs");
   $("logs").innerHTML = logs.length
     ? logs
@@ -118,105 +116,11 @@ async function loadDevice() {
             </div>`
         )
         .join("")
-    : "<p class='muted'>Пока нет команд. В Grok: list_devices → execute_command.</p>";
-  const msgs = await api("/api/devices/" + current + "/messages");
-  $("chat").innerHTML = msgs
-    .map((m) => `<div class="msg ${m.role}"><b>${m.role}:</b> ${escapeHtml(m.content)}</div>`)
-    .join("");
+    : "<p class='muted'>Пока пусто. Открой Grok и попроси что-то установить на этом ПК.</p>";
 }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-}
-
-$("btn-send").onclick = async () => {
-  if (!current) return;
-  const message = $("msg").value.trim();
-  if (!message) return;
-  $("msg").value = "";
-  try {
-    await api("/api/devices/" + current + "/chat", { method: "POST", body: JSON.stringify({ message }) });
-  } catch (e) {
-    alert(e.message);
-  }
-  await loadDevice();
-};
-
-$("btn-cmd").onclick = async () => {
-  if (!current) return;
-  let params = {};
-  try {
-    params = JSON.parse($("params").value || "{}");
-  } catch {
-    alert("params должен быть JSON");
-    return;
-  }
-  await api("/api/devices/" + current + "/command", {
-    method: "POST",
-    body: JSON.stringify({ action: $("action").value, params }),
-  });
-  await loadDevice();
-};
-
-function mcpView(me) {
-  return {
-    mcp_url: me.mcp_url || "https://bot.holderchat.com/mcp",
-    mcp_key: me.mcp_key || "",
-    mcp_connect_url: me.mcp_connect_url || (me.mcp_key ? `${me.mcp_url || "https://bot.holderchat.com/mcp"}?key=${me.mcp_key}` : ""),
-    grok_connectors: me.grok_connectors || "https://grok.com/connectors",
-    tagline: me.tagline || "Мозг — Grok Bot. Руки — агент. JSON команд, не скриншот терминала.",
-  };
-}
-
-function renderMcp(me) {
-  const m = mcpView(me || {});
-  if ($("tagline")) $("tagline").textContent = m.tagline;
-  const box = $("mcp-box");
-  if (!box) return;
-  const keyBlock = m.mcp_key
-    ? `<code class="block">Authorization: Bearer ${escapeHtml(m.mcp_key)}</code>`
-    : `<p class="muted">Войди — покажем MCP-ключ. Или возьми его на сайте после входа.</p>`;
-  const connectBlock = m.mcp_connect_url
-    ? `<code class="block">${escapeHtml(m.mcp_connect_url)}</code>`
-    : `<p class="muted">После входа появится полный URL для Grok.</p>`;
-  box.innerHTML = `
-    <p><strong>1.</strong> <a href="${m.grok_connectors}" target="_blank">grok.com/connectors</a> → Custom</p>
-    <p><strong>2.</strong> Server-URL для Grok:</p>
-    ${connectBlock}
-    <p><strong>3.</strong> URL + Bearer (если Grok просит OAuth):</p>
-    <code class="block">${escapeHtml(m.mcp_url)}</code>
-    ${keyBlock}
-    <div class="row mcp-actions">
-      <button type="button" id="copy-connect">Копировать URL для Grok</button>
-      <button type="button" id="copy-key" class="ghost">Копировать ключ</button>
-      <button type="button" id="btn-mcp" class="ghost">Новый ключ</button>
-      <a class="dl" href="https://grok.com" target="_blank">Open in Grok</a>
-    </div>`;
-  const copy = (t) => navigator.clipboard.writeText(t).catch(() => prompt("Скопируй:", t));
-  if ($("copy-connect")) $("copy-connect").onclick = () => copy(m.mcp_connect_url || m.mcp_url);
-  if ($("copy-key")) $("copy-key").onclick = () => copy(m.mcp_key);
-  if ($("btn-mcp")) $("btn-mcp").onclick = async () => {
-    if (!localStorage.getItem("token")) return;
-    if (!confirm("Старый MCP-ключ перестанет работать. Обнови connector в Grok.")) return;
-    await showMcp(true);
-  };
-}
-
-function renderMcpFallback() {
-  renderMcp({ mcp_url: "https://bot.holderchat.com/mcp" });
-}
-
-async function showMcp(forceNew) {
-  if (!localStorage.getItem("token")) {
-    renderMcpFallback();
-    return;
-  }
-  try {
-    const me = forceNew ? await api("/api/mcp-key", { method: "POST" }) : await api("/api/me");
-    renderMcp(me);
-  } catch (e) {
-    renderMcpFallback();
-  }
 }
 
 $("btn-stick").onclick = async () => {
@@ -235,4 +139,3 @@ $("btn-stick").onclick = async () => {
 };
 
 if (localStorage.getItem("token")) showApp();
-else renderMcpFallback();

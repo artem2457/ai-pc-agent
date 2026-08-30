@@ -59,30 +59,7 @@ header {
   flex-wrap: wrap;
 }
 header strong { flex: 1; min-width: 120px; }
-.hero {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding: 16px;
-  border-bottom: 1px solid var(--line);
-}
-@media (max-width: 900px) {
-  .hero { grid-template-columns: 1fr; }
-}
-.mcp-card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px;
-  font-size: 14px;
-}
-.mcp-card .block {
-  display: block;
-  margin: 6px 0;
-  padding: 8px;
-  word-break: break-all;
-}
-.layout { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 220px); }
+.layout { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 56px); }
 @media (max-width: 768px) {
   .layout { grid-template-columns: 1fr; }
 }
