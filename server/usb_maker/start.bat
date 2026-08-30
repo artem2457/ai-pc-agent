@@ -14,7 +14,7 @@ set "SERVER=http://localhost:8000"
 set "TOKEN="
 if not exist "%~dp0usb_maker.ps1" (
   echo Scripts not found locally. Downloading from %SERVER% ...
-  powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%~dp0usb_maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_usb.ps1' -OutFile '%~dp0write_usb.ps1' } catch { Write-Host $_; exit 1 }"
+  powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%~dp0usb_maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_linux_usb.ps1' -OutFile '%~dp0write_linux_usb.ps1' } catch { Write-Host $_; exit 1 }"
 )
 
 if not exist "%~dp0usb_maker.ps1" (

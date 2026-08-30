@@ -26,9 +26,13 @@ def test_usb_maker_scripts(client):
     assert ps1.status_code == 200
     assert b"AI PC Agent" in ps1.content
 
-    writer = client.get("/usb-maker/write_usb.ps1")
+    writer = client.get("/usb-maker/write_linux_usb.ps1")
     assert writer.status_code == 200
-    assert b"WinRE" in writer.content
+    assert b"Alpine" in writer.content
+
+    boot = client.get("/linux_usb/agent-boot.sh")
+    assert boot.status_code == 200
+    assert b"AIAgent" in boot.content
 
     bat = client.get("/usb-maker.bat")
     assert bat.status_code == 200

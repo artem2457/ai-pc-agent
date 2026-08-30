@@ -434,14 +434,24 @@ def download_usb(token: str, db: Session = Depends(get_db)):
         z.writestr(
             "HOW-TO.txt",
             "Run start.bat as Administrator. Token is already inside the file.\n"
-            "Select USB. No ISO - Grok downloads Windows later.\n"
-            "In BIOS: Boot from USB. Internet required.\n",
+            "Alpine Linux USB (~400 MB, open source). Internet required on boot.\n",
         )
     return Response(
         buf.getvalue(),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="usb-agent-{token}.zip"'},
     )
+
+
+def _linux_usb_path(name: str) -> Path:
+    for folder in (
+        ROOT / "linux_usb",
+        Path(__file__).resolve().parent.parent / "linux_usb",
+    ):
+        path = folder / name
+        if path.is_file():
+            return path
+    raise HTTPException(404, f"missing {name}")
 
 
 def _usb_maker_path(name: str) -> Path:
@@ -479,7 +489,7 @@ def _usb_maker_bat_body(token: str = "") -> bytes:
         f"set \"TOKEN={token}\"\r\n"
         "set \"PS=%TEMP%\\ai-pc-usb-maker.ps1\"\r\n"
         "echo Downloading from %SERVER% ...\r\n"
-        "powershell -NoProfile -Command \"Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%TEMP%\\ai-pc-usb-maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_usb.ps1' -OutFile '%TEMP%\\write_usb.ps1'\"\r\n"
+        "powershell -NoProfile -Command \"Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%TEMP%\\ai-pc-usb-maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_linux_usb.ps1' -OutFile '%TEMP%\\write_linux_usb.ps1'\"\r\n"
         "if not exist \"%PS%\" (\r\n"
         "  echo Download failed. Check server: %SERVER%\r\n"
         "  pause\r\n"
@@ -505,16 +515,26 @@ def usb_maker_bat(token: str = Query("")):
     )
 
 
+@app.get("/usb-maker/write_linux_usb.ps1")
+def usb_maker_linux_ps1():
+    return _usb_maker_file("write_linux_usb.ps1")
+
+
 @app.get("/usb-maker/write_usb.ps1")
-def usb_maker_ps1():
-    return _usb_maker_file("write_usb.ps1")
+def usb_maker_ps1_legacy():
+    return _usb_maker_file("write_linux_usb.ps1")
+
+
+@app.get("/linux_usb/agent-boot.sh")
+def linux_agent_boot():
+    return FileResponse(_linux_usb_path("agent-boot.sh"), media_type="text/plain")
 
 
 @app.get("/usb-maker.zip")
 def usb_maker_zip():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in ("usb_maker.ps1", "write_usb.ps1", "start.bat"):
+        for name in ("usb_maker.ps1", "write_linux_usb.ps1", "start.bat"):
             z.write(_usb_maker_path(name), name)
     return Response(
         buf.getvalue(),

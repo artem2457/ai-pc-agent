@@ -8,7 +8,7 @@ Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Continue"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$writer = Join-Path $here "write_usb.ps1"
+$writer = Join-Path $here "write_linux_usb.ps1"
 
 function Test-Admin {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -26,7 +26,7 @@ if (-not (Test-Admin)) {
 
 function Get-UsbDisks {
   try {
-    return @(Get-Disk | Where-Object { $_.BusType -eq "USB" } | Select-Object Number, FriendlyName, @{N = "SizeGB"; E = { [int]($_.Size / 1GB) } })
+    return @(Get-Disk | Where-Object { $_.BusType -eq "USB" } | Select-Object Number, FriendlyName, @{N = "SizeGB"; E = { [int]($_.Size / 1GB) } }, @{N = "SizeMB"; E = { [int]($_.Size / 1MB) } })
   } catch {
     return @()
   }
@@ -61,8 +61,8 @@ function Add-Box($default) {
   return $t
 }
 
-Add-Label "Create bootable USB drive"
-Add-Label "No Windows ISO needed. Grok Bot will download Windows on the target PC."
+Add-Label "Create bootable USB (Alpine Linux, open source)"
+Add-Label "Fits on a 512 MB+ flash drive. No Windows / WinRE license."
 
 $urlBox = $null
 $tokenBox = $null
@@ -136,18 +136,19 @@ $write.Add_Click({
       [Windows.Forms.MessageBox]::Show("Download usb-maker.bat from the website and run that file.")
       return
     }
-    $num = [int]$script:disks[$combo.SelectedIndex].Number
-    $sizeGB = [int]$script:disks[$combo.SelectedIndex].SizeGB
-    if ($sizeGB -lt 8) {
-      [Windows.Forms.MessageBox]::Show("USB is $sizeGB GB. Use an 8 GB or larger flash drive.")
+    $sel = $script:disks[$combo.SelectedIndex]
+    $num = [int]$sel.Number
+    $sizeMB = [int]$sel.SizeMB
+    if ($sizeMB -lt 512) {
+      [Windows.Forms.MessageBox]::Show("USB is $sizeMB MB. Use at least 512 MB.")
       return
     }
     $ok = [Windows.Forms.MessageBox]::Show("Disk $num will be completely erased. Continue?", "Erase USB?", "YesNo")
     if ($ok -ne "Yes") { return }
-    Write-Log "Writing... do not remove the USB drive. No ISO required."
+    Write-Log "Downloading Alpine Linux and writing USB..."
     if (-not (Test-Path $writer)) {
-      $dl = $url.TrimEnd("/") + "/usb-maker/write_usb.ps1"
-      Write-Log "Downloading write_usb.ps1 from $dl"
+      $dl = $url.TrimEnd("/") + "/usb-maker/write_linux_usb.ps1"
+      Write-Log "Downloading write_linux_usb.ps1 from $dl"
       Invoke-WebRequest -Uri $dl -OutFile $writer -UseBasicParsing
     }
     $root = Split-Path -Parent $here
@@ -171,7 +172,7 @@ $write.Add_Click({
       [Windows.Forms.MessageBox]::Show("Write failed.`n`n$tail")
       return
     }
-    [Windows.Forms.MessageBox]::Show("USB ready.`n1. Boot empty PC from USB`n2. Connect to the internet`n3. Device appears on the website`n4. Grok will download Windows")
+    [Windows.Forms.MessageBox]::Show("USB ready.`n1. Boot PC from USB`n2. Connect to the internet`n3. Device appears on the website`n4. Grok can install OS or software")
   })
 
 try {
