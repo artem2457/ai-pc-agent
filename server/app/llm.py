@@ -3,7 +3,7 @@ import re
 
 import httpx
 
-from .computer_use import desktop_goal_met, launch_gui_step, needs_desktop, screen_step
+from .computer_use import desktop_goal_met, launch_gui_step, needs_desktop, screen_step, wants_screen_describe
 from .config import settings
 
 ALLOWED_ACTIONS = {
@@ -335,6 +335,9 @@ def fallback_plan(text: str, os_name: str, chat_context: str = "") -> list[dict]
         clean = sanitize_step(followup, text)
         return [clean] if clean else []
 
+    if wants_screen_describe(text):
+        return [{"title": "Смотрю экран", "action": "get_screen", "params": {}}]
+
     if wants_visible_windows(text):
         return [{"title": "Окна на экране", "action": "get_visible_windows", "params": {}}]
 
@@ -488,6 +491,7 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 Правила:
 - Главный инструмент — {run_action} (params.script): команды ОС, запуск программ (Start-Process notepad).
 - Если задаче нужно ОКНО, ввод текста в программу, кнопки, диалоги, рабочий стол — сразу после открытия программы action=get_screen. Не жди ошибок консоли. Не пытайся печатать в GUI через echo в консоль.
+- «Какая иконка / что на экране / что в углу» → get_screen (опишет картинку, не get_processes).
 - «Какие приложения на экране» / visible windows → get_visible_windows (не get_processes).
 - install_package / uninstall_package — ТОЛЬКО если пользователь явно просит установить/удалить программу. Для winget используй ID вида Publisher.App (Notepad++.Notepad++), не display name с пробелами.
 - Короткое «скачай» после обсуждения Notepad++ → download_file с официального URL или install_package Notepad++.Notepad++.

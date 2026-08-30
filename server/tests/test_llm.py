@@ -129,6 +129,11 @@ def test_fallback_plan_visible_windows():
     assert plan[0]["action"] == "get_visible_windows"
 
 
+def test_fallback_plan_describe_screen():
+    plan = fallback_plan("какая иконка на рабочем столе в правом верхнем углу", "windows")
+    assert plan[0]["action"] == "get_screen"
+
+
 def test_resolve_short_followup_notepad_download():
     from app.llm import resolve_short_followup
 

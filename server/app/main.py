@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .auth import current_user, hash_password, make_token, verify_password
-from .computer_use import desktop_goal_met, needs_desktop, run_computer_use, see_and_act
+from .computer_use import desktop_goal_met, describe_screen, needs_desktop, run_computer_use, see_and_act, wants_screen_describe
 from .config import ROOT, settings
 from .db import (
     ChatMessage,
@@ -372,7 +372,10 @@ async def run_chat_for_device(db: Session, d: Device, text: str, owner_id: int) 
 
         step = {"title": decision["title"], "action": decision["action"], "params": decision.get("params") or {}}
         if step["action"] == "get_screen":
-            seen = await see_and_act(db, device=d, task=task, user_message=text, history=history)
+            if wants_screen_describe(text):
+                seen = await describe_screen(db, device=d, task=task, user_message=text, history=history)
+            else:
+                seen = await see_and_act(db, device=d, task=task, user_message=text, history=history)
             executed.extend(seen.get("executed") or [])
             history.extend(seen.get("history_items") or [])
             task.plan_json = json.dumps(executed, ensure_ascii=False)
@@ -383,6 +386,8 @@ async def run_chat_for_device(db: Session, d: Device, text: str, owner_id: int) 
                 if seen.get("ok") and not needs_desktop(text):
                     break
                 if not seen.get("ok"):
+                    if wants_screen_describe(text) and seen.get("message"):
+                        break
                     fail_reason = seen.get("message") or "экран не помог"
                     break
             continue
@@ -436,6 +441,13 @@ async def run_chat_for_device(db: Session, d: Device, text: str, owner_id: int) 
             fail_reason = "слишком много шагов без результата"
             db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: слишком много шагов. Смотри лог выше."))
             db.commit()
+
+    if fail_reason and wants_screen_describe(text) and any(
+        h.get("action") == "get_screen" and h.get("exit_code") == 0 for h in history
+    ):
+        task.status = "done"
+        db.commit()
+        return {"task_id": task.id, "status": "done", "plan": executed, "escalated": False}
 
     if fail_reason:
         used_screen = any(s.get("action") == "get_screen" for s in executed)

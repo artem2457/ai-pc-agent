@@ -1,4 +1,4 @@
-from app.computer_use import desktop_goal_met, needs_desktop, outcome_ok, parse_json_object, sanitize_gui_step, window_hint
+from app.computer_use import desktop_goal_met, needs_desktop, outcome_ok, parse_json_object, sanitize_gui_step, wants_screen_describe, window_hint
 
 
 def test_needs_desktop_and_goal():
@@ -6,6 +6,12 @@ def test_needs_desktop_and_goal():
     assert window_hint("напиши в блокнот hello") == "notepad"
     assert not desktop_goal_met("напиши в блокнот hello", [{"action": "run_powershell", "exit_code": 0}])
     assert desktop_goal_met("напиши в блокнот hello", [{"action": "type_text", "exit_code": 0}])
+
+
+def test_wants_screen_describe():
+    assert wants_screen_describe("какая иконка у меня на рабочем столе в правом верхнем углу")
+    assert wants_screen_describe("что видно на экране")
+    assert not wants_screen_describe("напиши в блокнот hello")
 
 
 def test_parse_json_object_from_markdown():

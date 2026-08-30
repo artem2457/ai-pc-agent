@@ -34,6 +34,16 @@ PRESS_KEYS = {
     "n",
 }
 
+DESCRIBE_RE = re.compile(
+    r"иконк|ярлык|"
+    r"что\s+(?:у меня\s+)?(?:на|видно|открыто|изображено|показано|написано)|"
+    r"какой\s+(?:цвет|текст|заголовок|рисунок)|"
+    r"какая\s+(?:картинка|надпись|программа|иконка)|"
+    r"опиши\s+(?:экран|рабоч|что)|"
+    r"what\s+(?:icon|do you see)|describe\s+(?:the\s+)?screen|"
+    r"в\s+(?:правом|левом|верхн|нижн)\w*\s+угл",
+    re.I,
+)
 DESKTOP_RE = re.compile(
     r"блокнот|notepad|калькулятор|calc\.exe|mspaint|paint|"
     r"рабоч\w*\s+стол|экран|скрин|"
@@ -45,16 +55,35 @@ TYPE_RE = re.compile(r"введ[иу]|напиш|напечат|текст|type 
 
 
 def needs_desktop(text: str) -> bool:
+    if wants_screen_describe(text):
+        return True
     return bool(DESKTOP_RE.search(text or ""))
+
+
+def wants_screen_describe(text: str) -> bool:
+    if wants_type(text):
+        return False
+    low = (text or "").lower()
+    if DESCRIBE_RE.search(text or ""):
+        return True
+    return any(w in low for w in ("видишь", "видно", "покажи что")) and any(
+        w in low for w in ("экран", "рабоч", "икон", "угол", "desktop")
+    )
 
 
 def wants_type(text: str) -> bool:
     return bool(TYPE_RE.search(text or ""))
 
 
+def describe_goal_met(text: str, history: list[dict]) -> bool:
+    return any(h.get("describe_ok") and h.get("exit_code") == 0 for h in history)
+
+
 def desktop_goal_met(text: str, history: list[dict]) -> bool:
     if not history:
         return False
+    if wants_screen_describe(text):
+        return describe_goal_met(text, history)
     if not needs_desktop(text):
         return True
     if wants_type(text):
@@ -269,6 +298,142 @@ JSON без markdown:
         return {"status": "step", **step}
     except Exception as e:
         return {"status": "done", "outcome": "fail", "message": f"Vision API: {e}"}
+
+
+async def vision_describe(
+    user_message: str,
+    os_name: str,
+    console_tail: str,
+    image_b64: str,
+    image_width: int,
+    image_height: int,
+    mime: str = "image/jpeg",
+) -> dict:
+    """Answer questions about what is visible on screen (no click/type)."""
+    if not settings.openai_api_key:
+        return {"status": "done", "outcome": "fail", "message": "Нет OPENAI_API_KEY для просмотра экрана."}
+    prompt = f"""Ты видишь скриншот экрана ПК пользователя. Ответь на вопрос по картинке.
+
+ОС: {os_name}
+Вопрос: {user_message}
+
+Контекст из консоли:
+{console_tail[-1500:] or "(пусто)"}
+
+Скриншот {image_width}x{image_height} пикселей.
+
+Правила:
+- Отвечай по-русски, конкретно: что видно на рабочем столе, в окнах, на панели задач.
+- Если спрашивают про иконку/ярлык в углу экрана — назови подпись под иконкой и что на ней изображено.
+- Если окна перекрывают рабочий стол — сначала опиши видимые окна, потом то что видно на столе по краям.
+- Не отвечай «не могу определить», если на картинке хоть что-то различимо — опиши лучшее предположение.
+- Кликать и печатать не нужно — только ответ текстом.
+
+JSON без markdown:
+{{"status":"done","outcome":"success","message":"..."}}"""
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={
+                    "model": settings.openai_model,
+                    "messages": [
+                        {"role": "system", "content": "Ты описываешь экран пользователя. Отвечай только JSON с ответом."},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{mime or 'image/jpeg'};base64,{image_b64}",
+                                        "detail": "high",
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 700,
+                },
+            )
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"]["content"]
+        raw = parse_json_object(content)
+        if not raw:
+            return {"status": "done", "outcome": "fail", "message": "Модель не вернула ответ по скриншоту."}
+        msg = str(raw.get("message") or "").strip()
+        if not msg:
+            return {"status": "done", "outcome": "fail", "message": "Пустой ответ по скриншоту."}
+        outcome = str(raw.get("outcome") or "success").lower()
+        if outcome == "fail":
+            outcome = "success"
+        return {"status": "done", "outcome": outcome, "message": msg[:4000]}
+    except Exception as e:
+        return {"status": "done", "outcome": "fail", "message": f"Vision API: {e}"}
+
+
+async def describe_screen(
+    db: Session,
+    *,
+    device: Device,
+    task: Task,
+    user_message: str,
+    history: list[dict],
+) -> dict:
+    """Screenshot + vision Q&A for «what is on screen» questions."""
+    executed: list[dict] = []
+    history_items: list[dict] = []
+    db.add(ChatMessage(device_pk=device.id, role="assistant", content="→ Смотрю экран"))
+    db.commit()
+    try:
+        shot = await hub.send_command(db, device, "get_screen", {}, task_id=task.id)
+    except RuntimeError as e:
+        return {"finished": True, "ok": False, "executed": [], "history_items": [], "message": str(e)}
+
+    data = shot.get("data") or {}
+    b64 = data.get("image_base64") or ""
+    summary = (shot.get("stdout") or shot.get("stderr") or "screenshot")[:500]
+    shot_step = {"title": "Смотрю экран", "action": "get_screen", "params": {}}
+    executed.append(shot_step)
+    if shot.get("exit_code") != 0 or not b64:
+        msg = shot.get("stderr") or "нет скриншота"
+        history_items.append(
+            {"title": shot_step["title"], "action": "get_screen", "params": {}, "exit_code": shot.get("exit_code"), "console": msg}
+        )
+        db.add(ChatMessage(device_pk=device.id, role="assistant", content=f"Экран недоступен: {msg}"))
+        db.commit()
+        return {"finished": True, "ok": False, "executed": executed, "history_items": history_items, "message": msg}
+
+    db.add(ChatMessage(device_pk=device.id, role="assistant", content=f"✓ экран\n{summary}"))
+    db.commit()
+    iw = int(data.get("image_width") or 0)
+    ih = int(data.get("image_height") or 0)
+    mime = str(data.get("mime") or "image/jpeg")
+    decision = await vision_describe(user_message, device.os or "windows", _console_tail(history), b64, iw, ih, mime)
+    msg = decision.get("message") or "Не удалось разобрать экран."
+    ok = outcome_ok(decision) and bool(msg.strip())
+    db.add(ChatMessage(device_pk=device.id, role="assistant", content=msg))
+    db.commit()
+    history_items.append(
+        {
+            "title": "Ответ по экрану",
+            "action": "get_screen",
+            "params": {},
+            "exit_code": 0 if ok else 1,
+            "console": msg[:800],
+            "describe_ok": ok,
+        }
+    )
+    return {
+        "finished": True,
+        "ok": ok,
+        "executed": executed,
+        "history_items": history_items,
+        "message": msg,
+    }
 
 
 async def see_and_act(
