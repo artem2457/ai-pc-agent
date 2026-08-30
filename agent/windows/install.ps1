@@ -137,8 +137,9 @@ $configJson = (@{ server_url = $Url.TrimEnd("/"); token = $Token } | ConvertTo-J
 
 $config = $configPath
 $agent = Join-Path $root "agent.py"
-$taskArgs = "`"$agent`" --config `"$config`" --device-id $DeviceId"
-$chatUrl = "$($Url.TrimEnd('/'))/pc-chat?token=$([uri]::EscapeDataString($Token))&device=$([uri]::EscapeDataString($DeviceId))"
+$urlClean = $Url.TrimEnd("/")
+$taskArgs = "`"$agent`" --config `"$config`" --url `"$urlClean`" --token `"$Token`" --device-id $DeviceId"
+$chatUrl = "$urlClean/pc-chat?token=$([uri]::EscapeDataString($Token))&device=$([uri]::EscapeDataString($DeviceId))"
 
 $action = New-ScheduledTaskAction -Execute $python -Argument $taskArgs
 $trigger = New-ScheduledTaskTrigger -AtLogOn
@@ -147,7 +148,7 @@ try {
   Unregister-ScheduledTask -TaskName "AI-PC-Agent" -Confirm:$false -ErrorAction SilentlyContinue
 } catch {}
 Register-ScheduledTask -TaskName "AI-PC-Agent" -Action $action -Trigger @($trigger, $boot) -RunLevel Highest -Force | Out-Null
-Start-Process -FilePath $python -ArgumentList $agent, "--config", $config, "--device-id", $DeviceId
+Start-Process -FilePath $python -ArgumentList $agent, "--config", $config, "--url", $urlClean, "--token", $Token, "--device-id", $DeviceId
 
 $desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 if (-not $desktop) { $desktop = [Environment]::GetFolderPath("Desktop") }

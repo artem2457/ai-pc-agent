@@ -616,14 +616,14 @@ def loop_sync(url: str, token: str, device_id: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default=os.environ.get("AGENT_URL", "http://localhost:8000"))
-    parser.add_argument("--token", default=os.environ.get("AGENT_TOKEN", ""))
-    parser.add_argument("--device-id", default=os.environ.get("DEVICE_ID", socket.gethostname().upper()[:16] or "PC"))
+    parser.add_argument("--url", default=os.environ.get("AGENT_URL") or "")
+    parser.add_argument("--token", default=os.environ.get("AGENT_TOKEN") or "")
+    parser.add_argument("--device-id", default=os.environ.get("DEVICE_ID") or socket.gethostname().upper()[:16] or "PC")
     parser.add_argument("--config", default="")
     args = parser.parse_args()
     cfg = load_config(Path(args.config) if args.config else None)
-    token = args.token or cfg.get("token") or ""
-    url = args.url or cfg.get("server_url") or "http://localhost:8000"
+    token = (args.token or cfg.get("token") or "").strip()
+    url = (args.url or cfg.get("server_url") or "http://localhost:8000").strip()
     if not token:
         print("Need --token (download install-agent.bat from the website)")
         sys.exit(1)
