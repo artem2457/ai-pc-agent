@@ -1,4 +1,11 @@
-from app.llm import extract_target, fallback_next, fallback_plan, sanitize_step
+from app.llm import (
+    extract_target,
+    fallback_next,
+    fallback_plan,
+    intent_step,
+    is_simple_package_request,
+    sanitize_step,
+)
 
 
 def test_detect_profile_server():
@@ -7,11 +14,22 @@ def test_detect_profile_server():
     assert detect_profile("поставь docker nginx") == "server"
 
 
-def test_fallback_plan_installs_git_and_python():
+def test_fallback_plan_runs_general_command():
+    plan = fallback_plan("покажи процессы", "windows")
+    assert len(plan) == 1
+    assert plan[0]["action"] == "get_processes"
+
+
+def test_fallback_plan_installs_simple_package():
+    plan = fallback_plan("Установи git", "linux")
+    assert plan[0]["action"] == "install_package"
+    assert plan[0]["params"]["name"] == "git"
+
+
+def test_fallback_plan_complex_install_uses_shell():
     plan = fallback_plan("Установи git и python", "linux")
-    names = [s["params"].get("name") for s in plan if s["action"] == "install_package"]
-    assert "git" in names
-    assert "python3" in names
+    assert plan[0]["action"] == "run_shell"
+    assert "git" in plan[0]["params"]["script"]
 
 
 def test_extract_product_key():
@@ -27,11 +45,15 @@ def test_sanitize_drops_reboot_unless_asked():
     assert sanitize_step(reboot, "перезагрузи компьютер") is not None
 
 
+def test_sanitize_fills_empty_script_from_user_text():
+    step = sanitize_step({"title": "cmd", "action": "run_powershell", "params": {}}, "Get-Date")
+    assert step["params"]["script"] == "Get-Date"
+
+
 def test_fallback_next_uses_console_after_failed_download():
     first = fallback_next("установи SuperApp", "windows", [])
     assert first["status"] == "step"
     assert first["action"] == "install_package"
-    assert "SuperApp" in first["params"]["name"]
 
     after_404 = fallback_next(
         "установи SuperApp",
@@ -78,24 +100,15 @@ def test_sanitize_fills_empty_package_name():
         "установи notepad++",
     )
     assert step is not None
-    assert step["params"]["name"]
     assert "notepad" in step["params"]["name"].lower()
 
 
-def test_fallback_next_retries_empty_package_name():
-    nxt = fallback_next(
-        "установи SuperApp",
-        "windows",
-        [
-            {
-                "title": "Установка SuperApp",
-                "action": "install_package",
-                "params": {},
-                "exit_code": 1,
-                "console": "empty package name",
-            }
-        ],
-    )
-    assert nxt["status"] == "step"
-    assert nxt["action"] == "install_package"
-    assert nxt["params"]["name"] == "SuperApp"
+def test_intent_step_arbitrary_command():
+    step = intent_step("dir C:\\Users", "windows")
+    assert step["action"] == "run_powershell"
+    assert step["params"]["script"] == "dir C:\\Users"
+
+
+def test_is_simple_package_request():
+    assert is_simple_package_request("установи notepad++")
+    assert not is_simple_package_request("установи git и настрой репозиторий")

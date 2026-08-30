@@ -332,7 +332,7 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
 
     history: list[dict] = []
     executed: list[dict] = []
-    db.add(ChatMessage(device_pk=d.id, role="assistant", content="Смотрю задачу и буду идти по выводу консоли, без готового сценария."))
+    db.add(ChatMessage(device_pk=d.id, role="assistant", content="Выполняю задачу на этом ПК — смотрю вывод консоли и иду дальше по логу."))
     db.commit()
 
     for _ in range(MAX_TURNS):
