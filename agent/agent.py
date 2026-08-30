@@ -60,6 +60,10 @@ class MiniWS:
         self.path = u.path or "/"
         if u.query:
             self.path += "?" + u.query
+        if (u.scheme == "wss" and self.port == 443) or (u.scheme == "ws" and self.port == 80):
+            self._host_header = self.host
+        else:
+            self._host_header = f"{self.host}:{self.port}"
         raw = socket.create_connection((self.host, self.port), timeout=60)
         if u.scheme == "wss":
             try:
@@ -76,7 +80,7 @@ class MiniWS:
         key = base64.b64encode(os.urandom(16)).decode()
         req = (
             f"GET {self.path} HTTP/1.1\r\n"
-            f"Host: {self.host}:{self.port}\r\n"
+            f"Host: {self._host_header}\r\n"
             "Upgrade: websocket\r\nConnection: Upgrade\r\n"
             f"Sec-WebSocket-Key: {key}\r\n"
             "Sec-WebSocket-Version: 13\r\n\r\n"
@@ -409,7 +413,7 @@ def load_config(path: Path | None) -> dict:
         Path(os.environ.get("PROGRAMDATA", "C:\\ProgramData")) / "AIAgent" / "config.json",
     ]:
         if candidate and Path(candidate).exists():
-            cfg = json.loads(Path(candidate).read_text(encoding="utf-8"))
+            cfg = json.loads(Path(candidate).read_text(encoding="utf-8-sig"))
             break
     return cfg
 

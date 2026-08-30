@@ -131,10 +131,11 @@ Invoke-WebRequest -Uri "$Url/agent.py" -OutFile (Join-Path $root "agent.py") -Us
 
 $python = Ensure-Python $root
 
-@{ server_url = $Url.TrimEnd("/"); token = $Token } | ConvertTo-Json |
-  Set-Content (Join-Path $root "config.json") -Encoding UTF8
+$configPath = Join-Path $root "config.json"
+$configJson = (@{ server_url = $Url.TrimEnd("/"); token = $Token } | ConvertTo-Json -Compress)
+[System.IO.File]::WriteAllText($configPath, $configJson, (New-Object System.Text.UTF8Encoding $false))
 
-$config = Join-Path $root "config.json"
+$config = $configPath
 $agent = Join-Path $root "agent.py"
 $taskArgs = "`"$agent`" --config `"$config`" --device-id $DeviceId"
 
@@ -145,6 +146,8 @@ try {
   Unregister-ScheduledTask -TaskName "AI-PC-Agent" -Confirm:$false -ErrorAction SilentlyContinue
 } catch {}
 Register-ScheduledTask -TaskName "AI-PC-Agent" -Action $action -Trigger @($trigger, $boot) -RunLevel Highest -Force | Out-Null
-Start-Process -FilePath $python -ArgumentList $taskArgs
+Start-Process -FilePath $python -ArgumentList $agent, "--config", $config, "--device-id", $DeviceId
 Write-Host "Agent installed and started. Device: $DeviceId"
 Write-Host "Check the website - PC should appear online in a few seconds."
+Write-Host "Press any key to close..."
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

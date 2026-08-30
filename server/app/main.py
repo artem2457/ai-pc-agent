@@ -534,7 +534,7 @@ def _install_agent_bat_body(token: str = "") -> bytes:
         "  exit /b 1\r\n"
         ")\r\n"
         "powershell -NoProfile -ExecutionPolicy Bypass -File \"%PS%\" -Token \"%TOKEN%\" -Url \"%SERVER%\"\r\n"
-        "if errorlevel 1 pause\r\n"
+        "pause\r\n"
     )
     return body.encode("ascii")
 

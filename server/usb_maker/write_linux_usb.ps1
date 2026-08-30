@@ -77,8 +77,9 @@ if ($localAgent) {
   Invoke-WebRequest -Uri ($ServerUrl.TrimEnd("/") + "/agent.py") -OutFile (Join-Path $agentDir "agent.py") -UseBasicParsing
 }
 
-@{ server_url = $ServerUrl.TrimEnd("/"); token = $Token } | ConvertTo-Json |
-  Set-Content (Join-Path $agentDir "config.json") -Encoding UTF8
+$configPath = Join-Path $agentDir "config.json"
+$configJson = (@{ server_url = $ServerUrl.TrimEnd("/"); token = $Token } | ConvertTo-Json -Compress)
+[System.IO.File]::WriteAllText($configPath, $configJson, (New-Object System.Text.UTF8Encoding $false))
 
 $bootSh = $null
 foreach ($base in @(
