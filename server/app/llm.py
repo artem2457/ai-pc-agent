@@ -13,6 +13,7 @@ ALLOWED_ACTIONS = {
     "get_system_info",
     "get_processes",
     "get_services",
+    "get_visible_windows",
     "read_file",
     "write_file",
     "upload_file",
@@ -26,6 +27,28 @@ ALLOWED_ACTIONS = {
     "partition_disk",
     "get_screen",
 }
+
+WINGET_IDS = {
+    "notepad++": "Notepad++.Notepad++",
+    "notepad plus plus": "Notepad++.Notepad++",
+    "google chrome": "Google.Chrome",
+    "chrome": "Google.Chrome",
+    "7zip": "7zip.7zip",
+    "7-zip": "7zip.7zip",
+    "git": "Git.Git",
+    "python": "Python.Python.3.13",
+    "vscode": "Microsoft.VisualStudioCode",
+    "visual studio code": "Microsoft.VisualStudioCode",
+}
+
+VISIBLE_WINDOWS_RE = re.compile(
+    r"на\s+экране|on\s+(?:the\s+)?screen|visible\s+window|"
+    r"какие\s+приложени|what\s+apps|what\s+windows|"
+    r"что\s+открыт|открыт\w*\s+(?:окн|прилож|программ)",
+    re.I,
+)
+FOLLOWUP_DOWNLOAD_RE = re.compile(r"^(?:скачай|скачать|download)\.?$", re.I)
+NOTEPAD_PLUS_RE = re.compile(r"notepad\+\+|notepad-plus-plus|npp", re.I)
 
 MAX_TURNS = 12
 CONSOLE_KEEP = 6000
@@ -116,6 +139,41 @@ def detect_profile(text: str) -> str | None:
         return "office"
     if any(w in t for w in ("nginx", "ssl", "certbot", "vps", "firewall", "сервер")):
         return "server"
+    return None
+
+
+def wants_visible_windows(text: str) -> bool:
+    low = (text or "").lower()
+    if VISIBLE_WINDOWS_RE.search(text or ""):
+        return True
+    return "приложени" in low and any(w in low for w in ("экран", "открыт", "сейчас", "видишь", "видно"))
+
+
+def normalize_winget_name(name: str) -> str:
+    key = (name or "").strip().lower()
+    if not key:
+        return ""
+    if key in WINGET_IDS:
+        return WINGET_IDS[key]
+    raw = (name or "").strip()
+    if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.[A-Za-z0-9][A-Za-z0-9_.-]*$", raw):
+        return raw
+    return raw
+
+
+def resolve_short_followup(text: str, chat_context: str = "") -> dict | None:
+    if not FOLLOWUP_DOWNLOAD_RE.match((text or "").strip()):
+        return None
+    ctx = chat_context or ""
+    if NOTEPAD_PLUS_RE.search(ctx):
+        return {
+            "title": "Скачивание Notepad++",
+            "action": "download_file",
+            "params": {
+                "url": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8/npp.8.9.8.Installer.x64.exe",
+                "path": r"C:\Users\Public\Downloads\npp_installer.exe",
+            },
+        }
     return None
 
 
@@ -217,6 +275,8 @@ def intent_step(text: str, os_name: str) -> dict:
     fam = family(os_name)
     run = run_action_for(os_name)
 
+    if wants_visible_windows(text):
+        return {"title": "Окна на экране", "action": "get_visible_windows", "params": {}}
     if any(w in low for w in ("желез", "hardware", "cpu", "оператив", "ram")) and not any(
         w in low for w in ("установ", "install", "удали", "uninstall")
     ):
@@ -269,7 +329,15 @@ def sanitize_step(step: dict | None, user_text: str) -> dict | None:
     }
 
 
-def fallback_plan(text: str, os_name: str) -> list[dict]:
+def fallback_plan(text: str, os_name: str, chat_context: str = "") -> list[dict]:
+    followup = resolve_short_followup(text, chat_context)
+    if followup:
+        clean = sanitize_step(followup, text)
+        return [clean] if clean else []
+
+    if wants_visible_windows(text):
+        return [{"title": "Окна на экране", "action": "get_visible_windows", "params": {}}]
+
     if needs_desktop(text):
         launched = launch_gui_step(text, os_name)
         if launched:
@@ -313,13 +381,13 @@ def fallback_plan(text: str, os_name: str) -> list[dict]:
     return [step] if step else []
 
 
-def fallback_next(text: str, os_name: str, history: list[dict]) -> dict:
+def fallback_next(text: str, os_name: str, history: list[dict], chat_context: str = "") -> dict:
     fam = family(os_name)
     target = extract_target(text)
     run_action = run_action_for(os_name)
 
     if not history:
-        plan = fallback_plan(text, os_name)
+        plan = fallback_plan(text, os_name, chat_context)
         step = plan[0] if plan else intent_step(text, os_name)
         clean = sanitize_step(step, text)
         if clean:
@@ -384,9 +452,9 @@ def fallback_next(text: str, os_name: str, history: list[dict]) -> dict:
     }
 
 
-async def llm_next(text: str, os_name: str, hardware: dict, history: list[dict]) -> dict:
+async def llm_next(text: str, os_name: str, hardware: dict, history: list[dict], chat_context: str = "") -> dict:
     if settings.openai_api_key:
-        decided = await _llm_next_api(text, os_name, hardware, history)
+        decided = await _llm_next_api(text, os_name, hardware, history, chat_context)
         if decided:
             if decided.get("status") == "done":
                 if needs_desktop(text) and not desktop_goal_met(text, history):
@@ -395,10 +463,15 @@ async def llm_next(text: str, os_name: str, hardware: dict, history: list[dict])
             step = sanitize_step(decided, text)
             if step and not already_tried(step, history):
                 return {"status": "step", **step}
-    return fallback_next(text, os_name, history)
+    followup = resolve_short_followup(text, chat_context)
+    if followup and not history:
+        clean = sanitize_step(followup, text)
+        if clean:
+            return {"status": "step", **clean}
+    return fallback_next(text, os_name, history, chat_context)
 
 
-async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[dict]) -> dict | None:
+async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[dict], chat_context: str = "") -> dict | None:
     fam = family(os_name)
     run_action = run_action_for(os_name)
     prompt = f"""Ты универсальный оператор ПК. Пользователь даёт ЛЮБУЮ задачу — файлы, команды, настройка, диагностика, установка софта.
@@ -406,6 +479,8 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 ОС: {os_name} ({fam})
 Железо: {json.dumps(hardware, ensure_ascii=False)[:1200]}
 Задача пользователя: {text}
+Недавний диалог (контекст коротких ответов вроде «скачай»):
+{(chat_context or "(нет)")[:2000]}
 
 Журнал уже выполненных команд и ИХ КОНСОЛЬНЫЙ ВЫВОД:
 {format_history(history)}
@@ -413,11 +488,13 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 Правила:
 - Главный инструмент — {run_action} (params.script): команды ОС, запуск программ (Start-Process notepad).
 - Если задаче нужно ОКНО, ввод текста в программу, кнопки, диалоги, рабочий стол — сразу после открытия программы action=get_screen. Не жди ошибок консоли. Не пытайся печатать в GUI через echo в консоль.
-- install_package / uninstall_package — ТОЛЬКО если пользователь явно просит установить/удалить программу одним названием.
+- «Какие приложения на экране» / visible windows → get_visible_windows (не get_processes).
+- install_package / uninstall_package — ТОЛЬКО если пользователь явно просит установить/удалить программу. Для winget используй ID вида Publisher.App (Notepad++.Notepad++), не display name с пробелами.
+- Короткое «скачай» после обсуждения Notepad++ → download_file с официального URL или install_package Notepad++.Notepad++.
 - read_file / write_file / upload_file — для работы с файлами.
 - get_processes / get_services / get_hardware / get_system_info — для информации о системе.
 - Смотри вывод консоли. Ошибка → другая команда, не повторяй то же самое.
-- reboot/shutdown только если пользователь сам просил.
+- reboot/shutdown только если пользователь сам просил. Не планируй перезагрузку после установки.
 - Не выдумывай URL для download_file.
 - Один ход = одно действие или status=done с ответом по логу.
 - Не status=done, пока не введён текст в окно, если пользователь просил написать/ввести.
@@ -464,11 +541,11 @@ JSON без markdown:
         return None
 
 
-async def llm_plan(text: str, os_name: str, hardware: dict) -> list[dict]:
-    first = await llm_next(text, os_name, hardware, [])
+async def llm_plan(text: str, os_name: str, hardware: dict, chat_context: str = "") -> list[dict]:
+    first = await llm_next(text, os_name, hardware, [], chat_context)
     if first.get("status") == "step":
         return [{"title": first["title"], "action": first["action"], "params": first.get("params") or {}}]
-    return fallback_plan(text, os_name)
+    return fallback_plan(text, os_name, chat_context)
 
 
 def troubleshooting_hint(step: dict, result: dict) -> dict | None:

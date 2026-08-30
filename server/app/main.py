@@ -315,9 +315,27 @@ async def send_command(
     return result
 
 
+def recent_chat_context(db: Session, device_pk: int, limit: int = 8) -> str:
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.device_pk == device_pk)
+        .order_by(ChatMessage.id.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return ""
+    lines = []
+    for m in reversed(rows):
+        role = "Пользователь" if m.role == "user" else "Бот"
+        lines.append(f"{role}: {(m.content or '')[:400]}")
+    return "\n".join(lines)
+
+
 async def run_chat_for_device(db: Session, d: Device, text: str, owner_id: int) -> dict:
     db.add(ChatMessage(device_pk=d.id, role="user", content=text))
     db.commit()
+    chat_context = recent_chat_context(db, d.id)
     try:
         hardware = json.loads(d.hardware or "{}")
     except json.JSONDecodeError:
@@ -340,7 +358,7 @@ async def run_chat_for_device(db: Session, d: Device, text: str, owner_id: int) 
     db.commit()
 
     for _ in range(MAX_TURNS):
-        decision = await llm_next(text, d.os or "linux", hardware, history)
+        decision = await llm_next(text, d.os or "linux", hardware, history, chat_context)
         if decision.get("status") != "step":
             if needs_desktop(text) and not desktop_goal_met(text, history):
                 decision = {"status": "step", "title": "Смотрю экран", "action": "get_screen", "params": {}}

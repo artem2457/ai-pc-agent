@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import ssl
@@ -24,7 +25,7 @@ try:
 except ImportError:
     websockets = None
 
-VERSION = "0.2.1"
+VERSION = "0.2.3"
 ALLOWED = {
     "run_powershell",
     "run_shell",
@@ -43,6 +44,7 @@ ALLOWED = {
     "upload_file",
     "get_processes",
     "get_services",
+    "get_visible_windows",
     "get_screen",
     "click",
     "type_text",
@@ -251,6 +253,95 @@ def _join_logs(chunks: list[str]) -> str:
     return "\n\n".join(c for c in chunks if c).strip()
 
 
+WINGET_IDS = {
+    "notepad++": "Notepad++.Notepad++",
+    "notepad plus plus": "Notepad++.Notepad++",
+    "google chrome": "Google.Chrome",
+    "chrome": "Google.Chrome",
+    "7zip": "7zip.7zip",
+    "7-zip": "7zip.7zip",
+    "git": "Git.Git",
+    "python": "Python.Python.3.13",
+    "vscode": "Microsoft.VisualStudioCode",
+    "visual studio code": "Microsoft.VisualStudioCode",
+}
+
+
+def normalize_winget_name(name: str) -> str:
+    key = (name or "").strip().lower()
+    if not key:
+        return ""
+    if key in WINGET_IDS:
+        return WINGET_IDS[key]
+    if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.[A-Za-z0-9][A-Za-z0-9_.-]*$", name.strip()):
+        return name.strip()
+    return name.strip()
+
+
+def install_package(name: str, os_name: str) -> tuple[int, str, str]:
+    raw = (name or "").strip()
+    if not raw:
+        return 1, "", "empty package name"
+    winget_id = WINGET_IDS.get(raw.lower()) or (
+        raw if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.[A-Za-z0-9][A-Za-z0-9_.-]*$", raw) else ""
+    )
+    if os_name in ("windows", "winpe"):
+        if shutil.which("winget"):
+            cmds: list[list[str]] = []
+            if winget_id:
+                cmds.append(
+                    [
+                        "winget",
+                        "install",
+                        "--id",
+                        winget_id,
+                        "-e",
+                        "--source",
+                        "winget",
+                        "--disable-interactivity",
+                        "--accept-package-agreements",
+                        "--accept-source-agreements",
+                    ]
+                )
+            if not winget_id or winget_id.lower() != raw.lower():
+                cmds.append(
+                    [
+                        "winget",
+                        "install",
+                        "--name",
+                        raw,
+                        "--source",
+                        "winget",
+                        "--disable-interactivity",
+                        "--accept-package-agreements",
+                        "--accept-source-agreements",
+                    ]
+                )
+            code, out, err = _winget_try(cmds)
+            blob = f"{out}\n{err}".lower()
+            if code != 0 and any(
+                x in blob
+                for x in (
+                    "already installed",
+                    "уже установлен",
+                    "доступные обновления не найдены",
+                    "no available upgrade",
+                    "no newer package versions",
+                )
+            ):
+                return 0, out, err
+            return code, out, err
+        if shutil.which("choco"):
+            return run(["choco", "install", raw, "-y"], timeout=600)
+        return 1, "", "no package manager"
+    if shutil.which("apt-get"):
+        cmd = f"export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y {raw}"
+        return run(cmd, shell=True, timeout=600)
+    if shutil.which("dnf"):
+        return run(["dnf", "install", "-y", raw], timeout=600)
+    return 1, "", "no package manager"
+
+
 def _winget_try(commands: list[list[str]]) -> tuple[int, str, str]:
     logs: list[str] = []
     last = (1, "", "winget failed")
@@ -264,43 +355,22 @@ def _winget_try(commands: list[list[str]]) -> tuple[int, str, str]:
     return last
 
 
-def install_package(name: str, os_name: str) -> tuple[int, str, str]:
-    name = (name or "").strip()
-    if not name:
-        return 1, "", "empty package name"
-    if os_name in ("windows", "winpe"):
-        if shutil.which("winget"):
-            return _winget_try(
-                [
-                    ["winget", "install", "--id", name, "-e", "--source", "winget", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
-                    ["winget", "install", "--name", name, "--source", "winget", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
-                    ["winget", "install", name, "--source", "winget", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
-                ]
-            )
-        if shutil.which("choco"):
-            return run(["choco", "install", name, "-y"], timeout=600)
-        return 1, "", "no package manager"
-    if shutil.which("apt-get"):
-        cmd = f"export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y {name}"
-        return run(cmd, shell=True, timeout=600)
-    if shutil.which("dnf"):
-        return run(["dnf", "install", "-y", name], timeout=600)
-    return 1, "", "no package manager"
-
-
 def uninstall_package(name: str, os_name: str) -> tuple[int, str, str]:
-    name = (name or "").strip()
+    raw = (name or "").strip()
+    name = normalize_winget_name(raw) or raw
     if not name:
         return 1, "", "empty package name"
     if os_name in ("windows", "winpe"):
         if shutil.which("winget"):
-            return _winget_try(
-                [
-                    ["winget", "uninstall", "--id", name, "-e", "--source", "winget", "--disable-interactivity"],
-                    ["winget", "uninstall", "--name", name, "--source", "winget", "--disable-interactivity"],
-                    ["winget", "uninstall", name, "--disable-interactivity"],
-                ]
-            )
+            winget_id = WINGET_IDS.get(raw.lower()) or (name if "." in name and " " not in name else "")
+            cmds: list[list[str]] = []
+            if winget_id:
+                cmds.append(["winget", "uninstall", "--id", winget_id, "-e", "--source", "winget", "--disable-interactivity"])
+            cmds.append(["winget", "uninstall", "--name", raw, "--source", "winget", "--disable-interactivity"])
+            code, out, err = _winget_try(cmds)
+            if code != 0 and "удалено" in f"{out}\n{err}".lower():
+                return 0, out, err
+            return code, out, err
         if shutil.which("choco"):
             return run(["choco", "uninstall", name, "-y"], timeout=600)
         return 1, "", "no package manager"
@@ -393,7 +463,7 @@ def _screenshot_pil() -> tuple[bytes, int, int, int, int] | None:
 
 
 def _screenshot_windows() -> tuple[bytes, int, int, int, int] | None:
-    dest = Path(os.environ.get("TEMP", ".")) / "ai-pc-screen.jpg"
+    dest = Path(os.environ.get("TEMP", ".")) / "ai-pc-screen.png"
     dest_ps = str(dest).replace("'", "")
     script = rf"""
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -415,14 +485,11 @@ if ($bmp.Width -gt $maxW) {{
   $bmp.Dispose()
   $bmp = $thumb
 }}
-$codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object {{ $_.MimeType -eq 'image/jpeg' }}
-$ep = New-Object System.Drawing.Imaging.EncoderParameters 1
-$ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]{JPEG_QUALITY})
-$bmp.Save('{dest_ps}', $codec, $ep)
+$bmp.Save('{dest_ps}', [System.Drawing.Imaging.ImageFormat]::Png)
 Write-Output ("SIZE " + $b.Width + " " + $b.Height + " " + $outW + " " + $outH)
 $g.Dispose(); $bmp.Dispose()
 """
-    code, out, _err = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], timeout=25)
+    code, out, err = run(["powershell", "-STA", "-NoProfile", "-NonInteractive", "-Command", script], timeout=25)
     if code != 0 or not dest.exists() or dest.stat().st_size < 100:
         return None
     data = dest.read_bytes()
@@ -434,6 +501,29 @@ $g.Dispose(); $bmp.Dispose()
             if len(parts) >= 5:
                 sw, sh, iw, ih = int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
     return data, iw, ih, sw, sh
+
+
+def _screenshot_windows_err() -> str:
+    dest = Path(os.environ.get("TEMP", ".")) / "ai-pc-screen.png"
+    dest_ps = str(dest).replace("'", "")
+    script = rf"""
+$ErrorActionPreference = 'Stop'
+try {{
+  Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+  $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+  $bmp = New-Object System.Drawing.Bitmap ([int]$b.Width), ([int]$b.Height)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen([int]$b.X, [int]$b.Y, 0, 0, $bmp.Size)
+  $bmp.Save('{dest_ps}', [System.Drawing.Imaging.ImageFormat]::Png)
+  $g.Dispose(); $bmp.Dispose()
+  Write-Output 'ok'
+}} catch {{
+  Write-Error $_.Exception.Message
+}}
+"""
+    code, out, err = run(["powershell", "-STA", "-NoProfile", "-NonInteractive", "-Command", script], timeout=25)
+    detail = (err or out or f"exit {code}").strip()
+    return detail[:400]
 
 
 def _screenshot_linux() -> tuple[bytes, int, int, int, int] | None:
@@ -455,27 +545,32 @@ def _screenshot_linux() -> tuple[bytes, int, int, int, int] | None:
 
 
 def capture_screen() -> dict:
+    errors: list[str] = []
     got = _screenshot_pil()
     if not got and sys.platform == "win32":
         got = _screenshot_windows()
+        if not got:
+            errors.append(_screenshot_windows_err())
     if not got:
         got = _screenshot_linux()
     if not got:
+        hint = "; ".join(e for e in errors if e) or "no capture backend (PIL / PowerShell / import)"
         return {
             "exit_code": 1,
             "stdout": "",
-            "stderr": "screenshot failed: no capture backend (PIL / PowerShell / import)",
+            "stderr": f"screenshot failed: {hint}",
             "data": {"available": False},
         }
     data, iw, ih, sw, sh = got
+    mime = "image/jpeg" if data[:3] == b"\xff\xd8\xff" else "image/png"
     b64 = base64.b64encode(data).decode("ascii")
     return {
         "exit_code": 0,
-        "stdout": f"screenshot {iw}x{ih} (screen {sw}x{sh}) jpeg {len(data)} bytes",
+        "stdout": f"screenshot {iw}x{ih} (screen {sw}x{sh}) {mime.split('/')[-1]} {len(data)} bytes",
         "stderr": "",
         "data": {
             "available": True,
-            "mime": "image/jpeg",
+            "mime": mime,
             "image_base64": b64,
             "image_width": iw,
             "image_height": ih,
@@ -483,6 +578,19 @@ def capture_screen() -> dict:
             "screen_height": sh,
         },
     }
+
+
+def get_visible_windows_list(os_name: str) -> tuple[int, str, str]:
+    if os_name in ("windows", "winpe"):
+        script = (
+            "Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | "
+            "Sort-Object ProcessName | "
+            "ForEach-Object { '{0}`t{1}`t{2}' -f $_.Id, $_.ProcessName, $_.MainWindowTitle }"
+        )
+        return run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], timeout=30)
+    if shutil.which("wmctrl"):
+        return run(["wmctrl", "-l"], timeout=15)
+    return 1, "", "no window list backend"
 
 
 def _map_point(params: dict) -> tuple[int, int]:
@@ -926,6 +1034,9 @@ def handle(action: str, params: dict, os_name: str) -> dict:
             code, out, err = run(["systemctl", "list-units", "--type=service", "--no-pager"])
         else:
             code, out, err = run(["sc", "query", "state=", "all"])
+        return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
+    if action == "get_visible_windows":
+        code, out, err = get_visible_windows_list(os_name)
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
     if action == "get_screen":
         return capture_screen()

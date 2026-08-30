@@ -190,6 +190,7 @@ async def vision_next(
     image_b64: str,
     image_width: int,
     image_height: int,
+    mime: str = "image/jpeg",
 ) -> dict:
     if not settings.openai_api_key:
         return {"status": "done", "outcome": "fail", "message": "Нет OPENAI_API_KEY для просмотра экрана."}
@@ -240,7 +241,7 @@ JSON без markdown:
                                 {
                                     "type": "image_url",
                                     "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_b64}",
+                                        "url": f"data:{mime or 'image/jpeg'};base64,{image_b64}",
                                         "detail": "high",
                                     },
                                 },
@@ -306,6 +307,7 @@ async def see_and_act(
 
     iw = int(data.get("image_width") or 0)
     ih = int(data.get("image_height") or 0)
+    mime = str(data.get("mime") or "image/jpeg")
     gui_history = [
         f"{h.get('title')} {h.get('action')} exit={h.get('exit_code')}"
         for h in history
@@ -319,6 +321,7 @@ async def see_and_act(
         b64,
         iw,
         ih,
+        mime,
     )
     if decision.get("status") != "step":
         msg = decision.get("message") or "Готово по экрану."
@@ -405,6 +408,7 @@ async def run_computer_use(
 
         iw = int(data.get("image_width") or 0)
         ih = int(data.get("image_height") or 0)
+        mime = str(data.get("mime") or "image/jpeg")
         decision = await vision_next(
             user_message,
             device.os or "windows",
@@ -413,6 +417,7 @@ async def run_computer_use(
             b64,
             iw,
             ih,
+            mime,
         )
         if decision.get("status") != "step":
             msg = decision.get("message") or "Готово по экрану."

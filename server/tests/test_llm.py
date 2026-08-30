@@ -124,6 +124,20 @@ def test_sanitize_fills_empty_package_name():
     assert "notepad" in step["params"]["name"].lower()
 
 
+def test_fallback_plan_visible_windows():
+    plan = fallback_plan("какие приложения сейчас на экране", "windows")
+    assert plan[0]["action"] == "get_visible_windows"
+
+
+def test_resolve_short_followup_notepad_download():
+    from app.llm import resolve_short_followup
+
+    step = resolve_short_followup("скачай", "Последняя версия Notepad++ 8.9.8")
+    assert step is not None
+    assert step["action"] == "download_file"
+    assert "notepad-plus-plus" in step["params"]["url"]
+
+
 def test_intent_step_arbitrary_command():
     step = intent_step("dir C:\\Users", "windows")
     assert step["action"] == "run_powershell"
