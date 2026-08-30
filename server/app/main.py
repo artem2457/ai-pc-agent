@@ -432,11 +432,11 @@ def download_usb(token: str, db: Session = Depends(get_db)):
                 z.write(p, name)
         z.writestr(
             "HOW-TO.txt",
-            "Zip не загрузочный. Запиши флешку программой:\n"
-            "1. Скачай /usb-maker.zip, запусти start.bat от администратора (Python не нужен).\n"
-            "2. Вставь токен, выбери USB. ISO не нужен — Windows скачает Grok.\n"
-            "3. В BIOS: Boot from USB. Интернет обязателен.\n"
-            f"4. На сайте появится ПК. Токен: {token}\n",
+            "This zip is not bootable. Write the USB with the maker tool:\n"
+            "1. Download /usb-maker.zip, run start.bat as Administrator (no Python needed).\n"
+            "2. Enter token, select USB. No ISO - Grok downloads Windows later.\n"
+            "3. In BIOS: Boot from USB. Internet required.\n"
+            f"4. PC appears on the website. Token: {token}\n",
         )
     return Response(
         buf.getvalue(),

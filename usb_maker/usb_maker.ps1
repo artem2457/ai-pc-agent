@@ -30,7 +30,7 @@ function Get-UsbDisks {
 }
 
 $form = New-Object Windows.Forms.Form
-$form.Text = "AI PC Agent — флешка"
+$form.Text = "AI PC Agent - USB"
 $form.Size = New-Object Drawing.Size(540, 480)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -56,13 +56,13 @@ function Add-Box($default) {
   return $t
 }
 
-Add-Label "Сделать загрузочную флешку"
-Add-Label "Windows ISO не нужен. Его потом скачает Grok Bot на пустой ПК."
-Add-Label "Адрес сервера"
+Add-Label "Create bootable USB drive"
+Add-Label "No Windows ISO needed. Grok Bot will download Windows on the target PC."
+Add-Label "Server URL"
 $urlBox = Add-Box $ServerUrl
-Add-Label "Токен с сайта"
+Add-Label "Token from website"
 $tokenBox = Add-Box ""
-Add-Label "Флешка (будет стёрта!)"
+Add-Label "USB drive (will be erased!)"
 
 $combo = New-Object Windows.Forms.ComboBox
 $combo.Location = New-Object Drawing.Point(16, $script:y)
@@ -72,7 +72,7 @@ $form.Controls.Add($combo)
 $script:y += 36
 
 $refresh = New-Object Windows.Forms.Button
-$refresh.Text = "Обновить список флешек"
+$refresh.Text = "Refresh USB list"
 $refresh.Location = New-Object Drawing.Point(16, $script:y)
 $refresh.Width = 220
 $form.Controls.Add($refresh)
@@ -88,7 +88,7 @@ $form.Controls.Add($log)
 $script:y += 150
 
 $write = New-Object Windows.Forms.Button
-$write.Text = "Записать флешку"
+$write.Text = "Write USB"
 $write.Location = New-Object Drawing.Point(16, $script:y)
 $write.Width = 220
 $write.Height = 32
@@ -106,32 +106,32 @@ function Refresh-Disks {
   $script:disks = @(Get-UsbDisks)
   $combo.Items.Clear()
   foreach ($d in $script:disks) {
-    [void]$combo.Items.Add(("Диск {0} — {1} ({2} ГБ)" -f $d.Number, $d.FriendlyName, $d.SizeGB))
+    [void]$combo.Items.Add(("Disk {0} - {1} ({2} GB)" -f $d.Number, $d.FriendlyName, $d.SizeGB))
   }
   if ($combo.Items.Count -gt 0) { $combo.SelectedIndex = 0 }
-  else { [void]$combo.Items.Add("USB не найдена"); $combo.SelectedIndex = 0 }
-  Write-Log ("Найдено USB: {0}" -f $script:disks.Count)
+  else { [void]$combo.Items.Add("No USB drive found"); $combo.SelectedIndex = 0 }
+  Write-Log ("USB drives found: {0}" -f $script:disks.Count)
 }
 
 $refresh.Add_Click({ Refresh-Disks })
 $write.Add_Click({
     if (-not $script:disks -or $script:disks.Count -eq 0) {
-      [Windows.Forms.MessageBox]::Show("Вставь USB и нажми Обновить.")
+      [Windows.Forms.MessageBox]::Show("Insert a USB drive and click Refresh.")
       return
     }
     $token = $tokenBox.Text.Trim()
     $url = $urlBox.Text.Trim()
     if (-not $token) {
-      [Windows.Forms.MessageBox]::Show("Вставь токен с сайта.")
+      [Windows.Forms.MessageBox]::Show("Enter the token from the website.")
       return
     }
     $num = [int]$script:disks[$combo.SelectedIndex].Number
-    $ok = [Windows.Forms.MessageBox]::Show("Диск $num будет полностью стёрт. Продолжить?", "Стереть флешку?", "YesNo")
+    $ok = [Windows.Forms.MessageBox]::Show("Disk $num will be completely erased. Continue?", "Erase USB?", "YesNo")
     if ($ok -ne "Yes") { return }
-    Write-Log "Пишу... не вынимай флешку. ISO не нужен."
+    Write-Log "Writing... do not remove the USB drive. No ISO required."
     if (-not (Test-Path $writer)) {
       $dl = $url.TrimEnd("/") + "/usb-maker/write_usb.ps1"
-      Write-Log "Скачиваю write_usb.ps1 с $dl"
+      Write-Log "Downloading write_usb.ps1 from $dl"
       Invoke-WebRequest -Uri $dl -OutFile $writer -UseBasicParsing
     }
     $root = Split-Path -Parent $here
@@ -148,15 +148,15 @@ $write.Add_Click({
     if (Test-Path $outFile) { Write-Log (Get-Content $outFile -Raw) }
     if (Test-Path $errFile) { $e = Get-Content $errFile -Raw; if ($e) { Write-Log $e } }
     if ($p.ExitCode -ne 0) {
-      [Windows.Forms.MessageBox]::Show("Ошибка записи. Смотри лог. Нужны права администратора и WinRE на этом ПК.")
+      [Windows.Forms.MessageBox]::Show("Write failed. Check the log. Admin rights and WinRE are required on this PC.")
       return
     }
-    [Windows.Forms.MessageBox]::Show("Флешка готова.`n1. Вставь в пустой ПК`n2. Boot from USB`n3. Интернет`n4. На сайте появится компьютер`n5. Grok скачает Windows сам")
+    [Windows.Forms.MessageBox]::Show("USB ready.`n1. Boot empty PC from USB`n2. Connect to the internet`n3. Device appears on the website`n4. Grok will download Windows")
   })
 
 try {
   Refresh-Disks
   [Windows.Forms.Application]::Run($form)
 } catch {
-  [Windows.Forms.MessageBox]::Show("Ошибка: $($_.Exception.Message)")
+  [Windows.Forms.MessageBox]::Show("Error: $($_.Exception.Message)")
 }

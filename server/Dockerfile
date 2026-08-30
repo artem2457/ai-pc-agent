@@ -6,6 +6,7 @@ COPY server /app/server
 COPY web /app/web
 COPY agent /app/agent
 COPY winpe /app/winpe
+COPY usb_maker /app/usb_maker
 COPY shared /app/shared
 RUN mkdir -p /app/data
 WORKDIR /app/server

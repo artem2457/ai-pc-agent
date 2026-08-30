@@ -12,16 +12,16 @@ if not %errorLevel%==0 (
 
 set "SERVER=http://localhost:8000"
 if not exist "%~dp0usb_maker.ps1" (
-  echo Скрипт не рядом. Скачиваю с %SERVER% ...
+  echo Scripts not found locally. Downloading from %SERVER% ...
   powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%~dp0usb_maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_usb.ps1' -OutFile '%~dp0write_usb.ps1' } catch { Write-Host $_; exit 1 }"
 )
 
 if not exist "%~dp0usb_maker.ps1" (
   echo.
-  echo Не найден usb_maker.ps1
-  echo Распакуй zip в папку и запусти start.bat из папки.
-  echo Или скачай с сайта один файл usb-maker.bat
-  echo Сервер должен быть запущен: %SERVER%
+  echo usb_maker.ps1 not found.
+  echo Unzip the archive and run start.bat from that folder.
+  echo Or download usb-maker.bat from the website.
+  echo Server must be running: %SERVER%
   pause
   exit /b 1
 )
@@ -29,6 +29,6 @@ if not exist "%~dp0usb_maker.ps1" (
 powershell -STA -NoProfile -ExecutionPolicy Bypass -File "%~dp0usb_maker.ps1"
 if errorlevel 1 (
   echo.
-  echo Окно программы не открылось. Текст ошибки выше.
+  echo GUI failed to start. See error above.
   pause
 )

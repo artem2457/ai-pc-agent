@@ -24,19 +24,19 @@ function Find-WinREWim {
     $p = "{0}:\Recovery\WindowsRE\Winre.wim" -f [char]$n
     if (Test-Path $p) { return $p }
   }
-  throw "WinRE не найден. На этом ПК выполни в админ-консоли: reagentc /enable"
+  throw "WinRE not found. Run as admin: reagentc /enable"
 }
 
 $letters = @(Get-FreeLetter)
-if ($letters.Count -lt 2) { throw "Нет свободных букв дисков" }
+if ($letters.Count -lt 2) { throw "Not enough free drive letters" }
 $efi = $letters[0]
 $win = $letters[1]
 
-Write-Host "Ищу WinRE на этом компьютере (ISO не нужен)..."
+Write-Host "Looking for WinRE on this PC (no ISO needed)..."
 $wim = Find-WinREWim
 Write-Host "WinRE: $wim"
 
-Write-Host "Стираю USB диск $DiskNumber ..."
+Write-Host "Erasing USB disk $DiskNumber ..."
 @"
 select disk $DiskNumber
 clean
@@ -51,14 +51,14 @@ assign letter=$win
 
 Start-Sleep -Seconds 2
 $root = "${win}:\"
-if (-not (Test-Path $root)) { throw "NTFS-раздел не появился" }
+if (-not (Test-Path $root)) { throw "NTFS partition did not appear" }
 
-Write-Host "Распаковываю среду загрузки на флешку..."
+Write-Host "Applying boot environment to USB..."
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 & dism.exe /Apply-Image /ImageFile:$wim /Index:1 /ApplyDir:$root
-if ($LASTEXITCODE -ne 0) { throw "DISM Apply-Image не удался (код $LASTEXITCODE)" }
+if ($LASTEXITCODE -ne 0) { throw "DISM Apply-Image failed (code $LASTEXITCODE)" }
 
-Write-Host "Делаю EFI-загрузку..."
+Write-Host "Creating EFI boot entry..."
 bcdboot.exe "${win}:\Windows" /s "${efi}:" /f UEFI | Out-Host
 
 $agentDir = Join-Path $root "AIAgent"
@@ -73,11 +73,11 @@ if ($ProjectRoot) {
 if ($localAgent) {
   Copy-Item $localAgent (Join-Path $agentDir "agent.py") -Force
 } else {
-  Write-Host "Скачиваю агент с сервера..."
+  Write-Host "Downloading agent from server..."
   Invoke-WebRequest -Uri ($ServerUrl.TrimEnd("/") + "/agent.py") -OutFile (Join-Path $agentDir "agent.py") -UseBasicParsing
 }
 
-Write-Host "Скачиваю портативный Python (на ПК Python не нужен)..."
+Write-Host "Downloading portable Python (no install on target PC)..."
 $pyZip = Join-Path $env:TEMP "ai-pc-python-embed.zip"
 $pyUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
 Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
@@ -122,5 +122,5 @@ goto retry
 Set-Content -Path (Join-Path $agentDir "run.cmd") -Value $runCmd -Encoding ASCII
 Copy-Item (Join-Path $agentDir "run.cmd") "${win}:\Windows\System32\startnet.cmd" -Force
 
-Write-Host "Готово. ISO не копировали — Windows скачает Grok после появления ПК на сайте."
-Write-Host "Вставь флешку в пустой ПК → Boot from USB → интернет."
+Write-Host "Done. No ISO copied - Grok will download Windows after the PC appears on the site."
+Write-Host "Boot empty PC from USB and connect to the internet."
