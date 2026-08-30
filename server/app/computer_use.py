@@ -36,12 +36,15 @@ PRESS_KEYS = {
 
 DESCRIBE_RE = re.compile(
     r"иконк|ярлык|"
+    r"закладк|вкладк|tabs?|"
     r"что\s+(?:у меня\s+)?(?:на|видно|открыто|изображено|показано|написано)|"
     r"какой\s+(?:цвет|текст|заголовок|рисунок)|"
     r"какая\s+(?:картинка|надпись|программа|иконка)|"
+    r"какие\s+\w+\s+видишь|"
     r"опиши\s+(?:экран|рабоч|что)|"
-    r"what\s+(?:icon|do you see)|describe\s+(?:the\s+)?screen|"
-    r"в\s+(?:правом|левом|верхн|нижн)\w*\s+угл",
+    r"what\s+(?:icon|do you see|tabs)|describe\s+(?:the\s+)?screen|"
+    r"в\s+(?:правом|левом|верхн|нижн)\w*\s+угл|"
+    r"в\s+браузер|браузер|browser|chrome|edge|firefox",
     re.I,
 )
 DESKTOP_RE = re.compile(
@@ -64,11 +67,31 @@ def wants_screen_describe(text: str) -> bool:
     if wants_type(text):
         return False
     low = (text or "").lower()
+    if "приложен" in low and any(w in low for w in ("экран", "открыт", "сейчас", "видишь")):
+        return False
     if DESCRIBE_RE.search(text or ""):
         return True
+    if looks_like_question(text):
+        return True
     return any(w in low for w in ("видишь", "видно", "покажи что")) and any(
-        w in low for w in ("экран", "рабоч", "икон", "угол", "desktop")
+        w in low for w in ("экран", "рабоч", "икон", "угол", "desktop", "браузер", "browser", "chrome", "edge", "вклад", "заклад")
     )
+
+
+def looks_like_question(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    if low.endswith("?"):
+        return True
+    return any(
+        low.startswith(w) or f" {w}" in low
+        for w in ("какие ", "какой ", "какая ", "какое ", "что ", "где ", "сколько ", "what ", "which ", "how many ")
+    ) and any(w in low for w in ("видишь", "видно", "на экране", "браузер", "browser", "chrome", "вклад", "заклад", "экран"))
+
+
+def should_describe_not_act(text: str) -> bool:
+    return wants_screen_describe(text)
 
 
 def wants_type(text: str) -> bool:
@@ -236,6 +259,7 @@ async def vision_next(
 Скриншот {image_width}x{image_height} пикселей. Координаты — в ЭТИХ пикселях, от левого верхнего угла.
 
 Правила:
+- Если пользователь СПРАШИВАЕТ что видно (вкладки, иконки, текст на экране) — НЕ type_text и НЕ click. Верни status=done, outcome=success, message=ответ по картинке.
 - Если нужное окно УЖЕ открыто (Блокнот, диалог) — НЕ открывай вторую копию. Кликни в белое поле ввода и сразу type_text с текстом задачи.
 - Для ввода текста предпочти один шаг type_text с params.x, params.y (центр поля) и params.window (например notepad).
 - Диалог Да/Yes/OK/Next — click.
@@ -294,6 +318,10 @@ JSON без markdown:
             }
         step = sanitize_gui_step(raw, image_width, image_height)
         if not step:
+            if should_describe_not_act(user_message):
+                return await vision_describe(
+                    user_message, os_name, console_tail, image_b64, image_width, image_height, mime
+                )
             return {"status": "done", "outcome": "fail", "message": "Некорректный GUI-шаг по скриншоту."}
         return {"status": "step", **step}
     except Exception as e:
@@ -325,6 +353,7 @@ async def vision_describe(
 Правила:
 - Отвечай по-русски, конкретно: что видно на рабочем столе, в окнах, на панели задач.
 - Если спрашивают про иконку/ярлык в углу экрана — назови подпись под иконкой и что на ней изображено.
+- Если спрашивают про вкладки/закладки браузера — перечисли заголовки вкладок, видимые на скриншоте Chrome/Edge/Firefox.
 - Если окна перекрывают рабочий стол — сначала опиши видимые окна, потом то что видно на столе по краям.
 - Не отвечай «не могу определить», если на картинке хоть что-то различимо — опиши лучшее предположение.
 - Кликать и печатать не нужно — только ответ текстом.
@@ -445,6 +474,9 @@ async def see_and_act(
     history: list[dict],
 ) -> dict:
     """Screenshot now, then one vision click/type. Used mid-task, not only after failures."""
+    if should_describe_not_act(user_message):
+        return await describe_screen(db, device=device, task=task, user_message=user_message, history=history)
+
     executed: list[dict] = []
     history_items: list[dict] = []
     db.add(ChatMessage(device_pk=device.id, role="assistant", content="→ Смотрю экран"))
@@ -489,9 +521,56 @@ async def see_and_act(
         mime,
     )
     if decision.get("status") != "step":
+        if not outcome_ok(decision) and should_describe_not_act(user_message):
+            decision = await vision_describe(
+                user_message, device.os or "windows", _console_tail(history), b64, iw, ih, mime
+            )
         msg = decision.get("message") or "Готово по экрану."
         db.add(ChatMessage(device_pk=device.id, role="assistant", content=msg))
         db.commit()
+        ok = outcome_ok(decision)
+        if ok and should_describe_not_act(user_message):
+            history_items.append(
+                {
+                    "title": "Ответ по экрану",
+                    "action": "get_screen",
+                    "params": {},
+                    "exit_code": 0,
+                    "console": msg[:800],
+                    "describe_ok": True,
+                }
+            )
+        return {
+            "finished": True,
+            "ok": ok,
+            "executed": executed,
+            "history_items": history_items,
+            "message": msg,
+        }
+
+    step = {"title": decision["title"], "action": decision["action"], "params": dict(decision.get("params") or {})}
+    typed = str(step.get("params", {}).get("text") or "").strip()
+    if step["action"] == "type_text" and (
+        should_describe_not_act(user_message)
+        or typed == user_message.strip()
+        or looks_like_question(typed)
+    ):
+        decision = await vision_describe(
+            user_message, device.os or "windows", _console_tail(history), b64, iw, ih, mime
+        )
+        msg = decision.get("message") or "Готово по экрану."
+        db.add(ChatMessage(device_pk=device.id, role="assistant", content=msg))
+        db.commit()
+        history_items.append(
+            {
+                "title": "Ответ по экрану",
+                "action": "get_screen",
+                "params": {},
+                "exit_code": 0 if outcome_ok(decision) else 1,
+                "console": msg[:800],
+                "describe_ok": outcome_ok(decision),
+            }
+        )
         return {
             "finished": True,
             "ok": outcome_ok(decision),

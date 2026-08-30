@@ -11,6 +11,7 @@ def test_needs_desktop_and_goal():
 def test_wants_screen_describe():
     assert wants_screen_describe("какая иконка у меня на рабочем столе в правом верхнем углу")
     assert wants_screen_describe("что видно на экране")
+    assert wants_screen_describe("какие закладки видишь в браузере")
     assert not wants_screen_describe("напиши в блокнот hello")
 
 

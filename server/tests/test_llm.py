@@ -132,6 +132,8 @@ def test_fallback_plan_visible_windows():
 def test_fallback_plan_describe_screen():
     plan = fallback_plan("какая иконка на рабочем столе в правом верхнем углу", "windows")
     assert plan[0]["action"] == "get_screen"
+    plan2 = fallback_plan("какие закладки видишь в браузере", "windows")
+    assert plan2[0]["action"] == "get_screen"
 
 
 def test_resolve_short_followup_notepad_download():
