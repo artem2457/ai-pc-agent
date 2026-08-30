@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI PC Agent protocol",
+  "description": "Messages between cloud server and device agent over WebSocket.",
+  "oneOf": [
+    { "$ref": "#/$defs/register" },
+    { "$ref": "#/$defs/heartbeat" },
+    { "$ref": "#/$defs/command" },
+    { "$ref": "#/$defs/result" },
+    { "$ref": "#/$defs/log" }
+  ],
+  "$defs": {
+    "register": {
+      "type": "object",
+      "required": ["type", "device_id", "token", "os", "agent_version"],
+      "properties": {
+        "type": { "const": "register" },
+        "device_id": { "type": "string" },
+        "token": { "type": "string" },
+        "os": { "enum": ["winpe", "windows", "linux"] },
+        "agent_version": { "type": "string" },
+        "hostname": { "type": "string" },
+        "hardware": { "type": "object" }
+      }
+    },
+    "heartbeat": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "heartbeat" },
+        "status": { "type": "string" }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": ["type", "id", "action"],
+      "properties": {
+        "type": { "const": "command" },
+        "id": { "type": "string" },
+        "action": {
+          "enum": [
+            "run_powershell",
+            "run_shell",
+            "get_hardware",
+            "get_system_info",
+            "install_package",
+            "download_file",
+            "reboot",
+            "shutdown",
+            "manage_service",
+            "install_windows",
+            "partition_disk",
+            "read_file",
+            "write_file",
+            "upload_file",
+            "get_processes",
+            "get_services",
+            "get_screen"
+          ]
+        },
+        "params": { "type": "object" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["type", "command_id", "exit_code"],
+      "properties": {
+        "type": { "const": "result" },
+        "command_id": { "type": "string" },
+        "exit_code": { "type": "integer" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "data": { "type": "object" }
+      }
+    },
+    "log": {
+      "type": "object",
+      "required": ["type", "message"],
+      "properties": {
+        "type": { "const": "log" },
+        "level": { "enum": ["info", "warn", "error"] },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

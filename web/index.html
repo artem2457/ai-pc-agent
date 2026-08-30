@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI PC Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="auth" class="card wrap">
+    <h1>AI PC Agent</h1>
+    <p class="muted">Подключи ПК или VPS и напиши, что установить.</p>
+    <input id="email" placeholder="email" />
+    <input id="password" type="password" placeholder="пароль" />
+    <div class="row">
+      <button id="btn-login">Войти</button>
+      <button id="btn-reg" class="ghost">Регистрация</button>
+    </div>
+    <p id="auth-err" class="err"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <strong>AI PC Agent</strong>
+      <span id="who" class="muted"></span>
+      <button id="btn-out" class="ghost">Выйти</button>
+    </header>
+    <div class="layout">
+      <aside>
+        <h2>Устройства</h2>
+        <div id="devices"></div>
+        <h2>Флешка / токен</h2>
+        <input id="stick-label" placeholder="USB Agent" />
+        <button id="btn-stick">Создать токен</button>
+        <p class="muted">Один файл, без Python и без ISO. Распаковывать zip не нужно.</p>
+        <p><a class="dl" href="/usb-maker.bat">Скачать программу флешки</a></p>
+        <div id="sticks"></div>
+        <h2>Grok MCP</h2>
+        <p class="muted">Мозг — Grok Bot. Руки — агент. Не картинка терминала, а JSON команд.</p>
+        <button id="btn-mcp">Создать MCP-ключ</button>
+        <div id="mcp-box" class="stick"></div>
+      </aside>
+      <main>
+        <div id="empty" class="muted">Выбери устройство слева</div>
+        <div id="panel" class="hidden">
+          <h2 id="dev-title"></h2>
+          <p id="dev-meta" class="muted"></p>
+          <div id="chat"></div>
+          <div class="row">
+            <input id="msg" placeholder="Установи Windows 11 Pro. Ключ: XXXXX-..." />
+            <button id="btn-send">Отправить</button>
+          </div>
+          <p class="muted"><a id="open-grok" href="https://grok.com/connectors" target="_blank">Open in Grok</a> — Custom connector, URL и Bearer с сайта. Сервер должен быть в интернете.</p>
+          <details>
+            <summary>Ручная команда</summary>
+            <select id="action">
+              <option>get_hardware</option>
+              <option>get_system_info</option>
+              <option>install_package</option>
+              <option>run_shell</option>
+              <option>run_powershell</option>
+              <option>install_windows</option>
+              <option>read_file</option>
+              <option>write_file</option>
+              <option>reboot</option>
+              <option>shutdown</option>
+            </select>
+            <input id="params" placeholder='{"name":"git"}' />
+            <button id="btn-cmd">Выполнить</button>
+          </details>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

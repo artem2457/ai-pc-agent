@@ -1,0 +1,12 @@
+[Unit]
+Description=AI PC Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/ai-pc-agent/agent.py --config /etc/ai-pc-agent/config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

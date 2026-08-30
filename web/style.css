@@ -1,0 +1,86 @@
+:root {
+  --bg: #111418;
+  --card: #1b2128;
+  --text: #e8eef4;
+  --muted: #8b98a5;
+  --ok: #3dd68c;
+  --off: #e35d6a;
+  --line: #2a333d;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Segoe UI, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.wrap { max-width: 420px; margin: 12vh auto; }
+.card { background: var(--card); padding: 24px; border-radius: 12px; }
+h1, h2 { margin: 0 0 12px; }
+input, select {
+  width: 100%;
+  margin: 6px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #12171c;
+  color: var(--text);
+}
+button {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+}
+a.dl {
+  display: inline-block;
+  margin: 8px 0 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: white;
+  text-decoration: none;
+}
+.row { display: flex; gap: 8px; }
+.muted { color: var(--muted); }
+.err { color: var(--off); }
+.hidden { display: none !important; }
+header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+header strong { flex: 1; }
+.layout { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 56px); }
+aside { border-right: 1px solid var(--line); padding: 16px; }
+main { padding: 16px; }
+.device {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 8px 0;
+  cursor: pointer;
+}
+.device.active { border-color: #3b82f6; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dot.on { background: var(--ok); }
+.dot.off { background: var(--off); }
+#chat {
+  background: #12171c;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 280px;
+  max-height: 55vh;
+  overflow: auto;
+  margin: 12px 0;
+  white-space: pre-wrap;
+}
+.msg { margin: 8px 0; }
+.msg.user { color: #9ec1ff; }
+.msg.assistant { color: #d7e3c0; }
+.stick { font-size: 13px; margin-top: 10px; word-break: break-all; }
+code { background: #12171c; padding: 2px 4px; border-radius: 4px; }
