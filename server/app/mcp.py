@@ -127,13 +127,19 @@ TOOLS = [
     },
     {
         "name": "install_os",
-        "description": "Install Windows from an ISO/WIM already on the device. First use download_file to fetch the ISO (Grok finds the official link in its browser). Do not ask the USB maker for an ISO.",
+        "description": (
+            "Install Windows from an ISO already on the device. "
+            "Stages AIAgent + Autounattend for autostart after first boot, then runs setup.exe. "
+            "First use download_file to fetch the ISO (Grok finds the official link). "
+            "Use clean=true for /auto clean (wipes C:). Agent reconnects after reboot without manual install.bat."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "device_id": {"type": "string"},
-                "image": {"type": "string"},
+                "image": {"type": "string", "description": "Path to windows.iso on device, e.g. D:\\\\windows.iso"},
                 "product_key": {"type": "string"},
+                "clean": {"type": "boolean", "description": "Clean install (/auto clean) instead of upgrade"},
             },
             "required": ["device_id"],
         },
@@ -394,7 +400,11 @@ async def run_tool(db: Session, owner_id: int, name: str, args: dict) -> dict:
     if name == "install_os":
         return await go(
             "install_windows",
-            {"image": args.get("image"), "product_key": args.get("product_key")},
+            {
+                "image": args.get("image"),
+                "product_key": args.get("product_key"),
+                "clean": args.get("clean"),
+            },
         )
     if name == "get_processes":
         return await go("get_processes", {})

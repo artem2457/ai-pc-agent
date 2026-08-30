@@ -25,7 +25,7 @@ try:
 except ImportError:
     websockets = None
 
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 AGENT_FILE = Path(__file__).resolve()
 ALLOWED = {
     "run_powershell",
@@ -1173,46 +1173,82 @@ Write-Output 'partition_disk: inspect only unless confirmed; use Autounattend fo
         code, out, err = run(["powershell", "-NoProfile", "-Command", script])
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
     if action == "install_windows":
+        cfg = load_config(None)
+        base = str(params.get("server_url") or cfg.get("server_url") or os.environ.get("AGENT_URL") or "").strip().rstrip("/")
+        token = str(params.get("token") or cfg.get("token") or os.environ.get("AGENT_TOKEN") or "").strip()
+        device_id = str(params.get("device_id") or cfg.get("device_id") or socket.gethostname()).strip()
         key = (params.get("product_key") or "").replace("'", "").replace('"', "")
         image = (params.get("image") or "").replace("'", "")
-        script = r"""
+        clean = str(params.get("clean") or "").lower() in ("1", "true", "yes", "clean")
+
+        if os_name == "linux":
+            script = Path(__file__).resolve().parent / "linux" / "install_windows.sh"
+            if not script.exists():
+                return {"exit_code": 1, "stdout": "", "stderr": "missing install_windows.sh", "data": {}}
+            cmd = ["sh", str(script), "--url", base, "--token", token, "--device-id", device_id]
+            if image:
+                cmd += ["--iso", image]
+            if clean:
+                cmd += ["--clean"]
+            code, out, err = run(cmd, timeout=7200)
+            return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
+
+        if not base or not token:
+            return {"exit_code": 1, "stdout": "", "stderr": "install_windows needs server_url and token in config", "data": {}}
+
+        clean_flag = "$true" if clean else "$false"
+        ps_script = rf"""
 $ErrorActionPreference = 'Continue'
-$key = 'PRODUCTKEY'
-$image = 'IMAGEPATH'
-function Find-Setup($root) {
-  if (-not $root) { return $null }
+$base = '{base.replace("'", "''")}'
+$token = '{token.replace("'", "''")}'
+$deviceId = '{device_id.replace("'", "''")}'
+$key = '{key}'
+$image = '{image}'
+$clean = {clean_flag}
+$stagePs = Join-Path $env:TEMP 'ai-pc-stage.ps1'
+Invoke-WebRequest -Uri ($base + '/stage_autostart.ps1') -OutFile $stagePs -UseBasicParsing
+& $stagePs -Url $base -Token $token -DeviceId $deviceId -Image $image $(if ($clean) {{ '-CleanInstall' }})
+$unattend = 'C:\ProgramData\AIAgent\Autounattend.xml'
+function Find-Setup($root) {{
+  if (-not $root) {{ return $null }}
   Get-ChildItem -Path $root -Filter setup.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-}
-if ($image -like '*.iso' -and (Test-Path $image)) {
+}}
+$roots = @()
+if ($image -like '*.iso' -and (Test-Path $image)) {{
   $mounted = Mount-DiskImage -ImagePath $image -PassThru
   Start-Sleep -Seconds 3
   $letter = ($mounted | Get-Volume).DriveLetter
-  if ($letter) { $image = "$letter`:\" }
-}
-$roots = @()
-if ($image) { $roots += $image }
+  if ($letter) {{ $roots += "$letter`:\" }}
+}} elseif ($image -and (Test-Path $image)) {{
+  $roots += $image
+}}
 $roots += @('X:\','C:\','D:\','E:\','F:\','G:\','W:\')
-$iso = Get-ChildItem -Path X:\,C:\,D:\,E:\,F:\,G:\,W:\ -Filter *.iso -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($iso) {
+$iso = Get-ChildItem -Path C:\,D:\,E:\,F:\,G:\,W:\,X:\ -Filter *.iso -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($iso) {{
   $mounted = Mount-DiskImage -ImagePath $iso.FullName -PassThru -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 3
   $letter = ($mounted | Get-Volume).DriveLetter
-  if ($letter) { $roots = @("$letter`:\") + $roots }
-}
+  if ($letter) {{ $roots = @("$letter`:\") + $roots }}
+}}
 $setup = $null
-foreach ($r in $roots) { $setup = Find-Setup $r; if ($setup) { break } }
-if (-not $setup) {
-  Write-Output 'setup.exe not found. Grok should download_file the official Windows ISO first, then call install_os.'
+foreach ($r in $roots) {{ $setup = Find-Setup $r; if ($setup) {{ break }} }}
+if (-not $setup) {{
+  Write-Output 'setup.exe not found. download_file windows.iso first.'
   exit 1
-}
+}}
 Write-Output ("setup=" + $setup.FullName)
-$arg = '/auto upgrade /noreboot'
-if ($key) { $arg = "/pkey $key $arg" }
+Write-Output ("unattend=" + $unattend)
+if ($clean) {{
+  $arg = "/auto clean /unattend:$unattend"
+}} else {{
+  $arg = "/auto upgrade /unattend:$unattend /noreboot"
+}}
+if ($key) {{ $arg = "/pkey $key $arg" }}
+Write-Output ("args=" + $arg)
 Start-Process -FilePath $setup.FullName -ArgumentList $arg -Wait -ErrorAction SilentlyContinue
-Write-Output 'setup finished or launched'
+Write-Output 'setup finished; after reboot agent starts via FirstLogonCommands (install.ps1)'
 """
-        script = script.replace("PRODUCTKEY", key).replace("IMAGEPATH", image)
-        code, out, err = run(["powershell", "-NoProfile", "-Command", script], timeout=7200)
+        code, out, err = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script], timeout=7200)
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
     return {"exit_code": 2, "stdout": "", "stderr": "unhandled", "data": {}}
 

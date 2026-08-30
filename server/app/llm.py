@@ -362,6 +362,12 @@ def fallback_plan(text: str, os_name: str, chat_context: str = "") -> list[dict]
         params = {}
         if key:
             params["product_key"] = key
+        low = text.lower()
+        if any(w in low for w in ("чистую", "clean install", "с нуля", "переустанов", "format c")):
+            params["clean"] = True
+        iso = re.search(r"([A-Za-z]:\\[^\s\"']+\.iso)", text, re.I)
+        if iso:
+            params["image"] = iso.group(1)
         step = {"title": "Установка Windows", "action": "install_windows", "params": params}
         clean = sanitize_step(step, text)
         return [clean] if clean else []
@@ -499,6 +505,7 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 - get_processes / get_services / get_hardware / get_system_info — для информации о системе.
 - Смотри вывод консоли. Ошибка → другая команда, не повторяй то же самое.
 - reboot/shutdown только если пользователь сам просил. Не планируй перезагрузку после установки.
+- install_windows: сначала download_file windows.iso, затем install_windows с image и при необходимости clean=true. Перед setup автоматически кладёт AIAgent + Autounattend — после первого входа агент сам ставит scheduled task.
 - Не выдумывай URL для download_file.
 - Один ход = одно действие или status=done с ответом по логу.
 - Не status=done, пока не введён текст в окно, если пользователь просил написать/ввести.

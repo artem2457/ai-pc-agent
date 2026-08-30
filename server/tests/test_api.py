@@ -76,6 +76,17 @@ def test_install_agent_downloads(client):
     assert re.match(r"0\.\d+\.\d+", ver.json()["version"])
 
 
+def test_windows_autostart_assets(client):
+    stage = client.get("/stage_autostart.ps1")
+    assert stage.status_code == 200
+    assert b"Autounattend-oobe.xml" in stage.content
+
+    oobe = client.get("/winpe/Autounattend-oobe.xml")
+    assert oobe.status_code == 200
+    assert b"FirstLogonCommands" in oobe.content
+    assert b"install.ps1" in oobe.content
+
+
 def test_usb_maker_bat_embeds_token(client):
     client.post("/api/register", json={"email": "usb@example.com", "password": "test-password-123"})
     login = client.post("/api/login", json={"email": "usb@example.com", "password": "test-password-123"})

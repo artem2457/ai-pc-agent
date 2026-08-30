@@ -809,6 +809,22 @@ def autounattend():
     return FileResponse(path, media_type="application/xml")
 
 
+@app.get("/winpe/Autounattend-oobe.xml")
+def autounattend_oobe():
+    path = WINPE / "Autounattend-oobe.xml"
+    if not path.exists():
+        raise HTTPException(404, "нет Autounattend-oobe.xml")
+    return FileResponse(path, media_type="application/xml")
+
+
+@app.get("/stage_autostart.ps1")
+def stage_autostart_ps1():
+    path = ROOT / "agent" / "windows" / "stage_autostart.ps1"
+    if not path.exists():
+        raise HTTPException(404, "нет stage_autostart.ps1")
+    return FileResponse(path, media_type="text/plain")
+
+
 @app.get("/agent.py")
 def agent_py():
     return FileResponse(ROOT / "agent" / "agent.py", media_type="text/x-python")

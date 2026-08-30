@@ -76,7 +76,7 @@
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
           <Order>2</Order>
-          <Path>cmd /c copy /Y X:\AIAgent\config.json C:\ProgramData\AIAgent\config.json</Path>
+          <Path>powershell -NoProfile -ExecutionPolicy Bypass -Command "$dest='C:\ProgramData\AIAgent'; New-Item -ItemType Directory -Force -Path $dest | Out-Null; foreach ($src in 'X:\AIAgent','D:\AIAgent','E:\AIAgent','F:\AIAgent','W:\AIAgent') { if (Test-Path (Join-Path $src 'config.json')) { Copy-Item (Join-Path $src '*') $dest -Recurse -Force; break } }"</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
     </component>

@@ -6,6 +6,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$configPath = Join-Path $root "config.json"
+if (-not $Token -and (Test-Path $configPath)) {
+  $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($cfg.token) { $Token = [string]$cfg.token }
+  if ($cfg.server_url) { $Url = [string]$cfg.server_url }
+  if ($cfg.device_id -and -not $PSBoundParameters.ContainsKey("DeviceId")) {
+    $DeviceId = [string]$cfg.device_id
+  }
+}
+
 function Test-Admin {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
   $p = New-Object Security.Principal.WindowsPrincipal($id)
