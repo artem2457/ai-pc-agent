@@ -1,5 +1,6 @@
 param(
-  [string]$ServerUrl = "http://localhost:8000"
+  [string]$ServerUrl = "http://localhost:8000",
+  [string]$Token = ""
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -17,7 +18,9 @@ function Test-Admin {
 
 if (-not (Test-Admin)) {
   $script = $MyInvocation.MyCommand.Path
-  Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$script`""
+  $argList = "-STA -NoProfile -ExecutionPolicy Bypass -File `"$script`" -ServerUrl `"$ServerUrl`""
+  if ($Token) { $argList += " -Token `"$Token`"" }
+  Start-Process powershell.exe -Verb RunAs -ArgumentList $argList
   exit
 }
 
@@ -31,12 +34,14 @@ function Get-UsbDisks {
 
 $form = New-Object Windows.Forms.Form
 $form.Text = "AI PC Agent - USB"
-$form.Size = New-Object Drawing.Size(540, 480)
+$form.Size = New-Object Drawing.Size(540, 420)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 
 $script:y = 16
+$script:serverUrl = $ServerUrl
+$script:agentToken = $Token
 function Add-Label($text) {
   $l = New-Object Windows.Forms.Label
   $l.Text = $text
@@ -58,10 +63,16 @@ function Add-Box($default) {
 
 Add-Label "Create bootable USB drive"
 Add-Label "No Windows ISO needed. Grok Bot will download Windows on the target PC."
-Add-Label "Server URL"
-$urlBox = Add-Box $ServerUrl
-Add-Label "Token from website"
-$tokenBox = Add-Box ""
+
+$urlBox = $null
+$tokenBox = $null
+if (-not $script:agentToken) {
+  Add-Label "Server URL"
+  $urlBox = Add-Box $ServerUrl
+  Add-Label "Token from website"
+  $tokenBox = Add-Box ""
+}
+
 Add-Label "USB drive (will be erased!)"
 
 $combo = New-Object Windows.Forms.ComboBox
@@ -119,10 +130,10 @@ $write.Add_Click({
       [Windows.Forms.MessageBox]::Show("Insert a USB drive and click Refresh.")
       return
     }
-    $token = $tokenBox.Text.Trim()
-    $url = $urlBox.Text.Trim()
+    $url = if ($urlBox) { $urlBox.Text.Trim() } else { $script:serverUrl }
+    $token = if ($tokenBox) { $tokenBox.Text.Trim() } else { $script:agentToken }
     if (-not $token) {
-      [Windows.Forms.MessageBox]::Show("Enter the token from the website.")
+      [Windows.Forms.MessageBox]::Show("Download usb-maker.bat from the website and run that file.")
       return
     }
     $num = [int]$script:disks[$combo.SelectedIndex].Number

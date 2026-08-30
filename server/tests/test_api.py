@@ -35,6 +35,19 @@ def test_usb_maker_scripts(client):
     assert b"@echo off" in bat.content
 
 
+def test_usb_maker_bat_embeds_token(client):
+    client.post("/api/register", json={"email": "usb@example.com", "password": "test-password-123"})
+    login = client.post("/api/login", json={"email": "usb@example.com", "password": "test-password-123"})
+    auth = {"Authorization": "Bearer " + login.json()["token"]}
+    stick = client.post("/api/sticks", json={"label": "PC"}, headers=auth)
+    enroll = stick.json()["token"]
+    bat = client.get("/usb-maker.bat", params={"token": enroll})
+    assert bat.status_code == 200
+    text = bat.content.decode("ascii")
+    assert f"TOKEN={enroll}" in text
+    assert "-Token" in text
+
+
 def test_mcp_rejects_invalid_key(client):
     response = client.post(
         "/mcp",

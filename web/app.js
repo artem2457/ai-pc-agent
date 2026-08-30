@@ -75,7 +75,7 @@ async function refresh() {
           <span class="muted">${d.os} · ${d.status}</span>
         </div>`
     )
-    .join("") || "<p class='muted'>Нет устройств. Создай токен и запусти агент.</p>";
+    .join("") || "<p class='muted'>Нет устройств. Скачай программу флешки и запусти её.</p>";
   $("devices").querySelectorAll(".device").forEach((el) => {
     el.onclick = () => openDevice(el.dataset.id);
   });
@@ -83,8 +83,8 @@ async function refresh() {
   $("sticks").innerHTML = sticks
     .map(
       (s) =>
-        `<div class="stick">${s.label}<br/><code>${s.token}</code><br/>
-        <a href="/api/sticks/${s.token}/usb.zip">скачать USB zip</a></div>`
+        `<div class="stick">${s.label}<br/>
+        <a class="dl" href="/usb-maker.bat?token=${encodeURIComponent(s.token)}" download="usb-maker.bat">Скачать снова</a></div>`
     )
     .join("");
 }
@@ -128,9 +128,8 @@ $("btn-stick").onclick = async () => {
     method: "POST",
     body: JSON.stringify({ label: $("stick-label").value || "USB Agent" }),
   });
-  alert("Токен агента: " + s.token);
   const a = document.createElement("a");
-  a.href = "/usb-maker.bat";
+  a.href = "/usb-maker.bat?token=" + encodeURIComponent(s.token);
   a.download = "usb-maker.bat";
   document.body.appendChild(a);
   a.click();

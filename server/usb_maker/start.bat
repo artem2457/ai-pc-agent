@@ -11,6 +11,7 @@ if not %errorLevel%==0 (
 )
 
 set "SERVER=http://localhost:8000"
+set "TOKEN="
 if not exist "%~dp0usb_maker.ps1" (
   echo Scripts not found locally. Downloading from %SERVER% ...
   powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%~dp0usb_maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_usb.ps1' -OutFile '%~dp0write_usb.ps1' } catch { Write-Host $_; exit 1 }"
@@ -19,14 +20,12 @@ if not exist "%~dp0usb_maker.ps1" (
 if not exist "%~dp0usb_maker.ps1" (
   echo.
   echo usb_maker.ps1 not found.
-  echo Unzip the archive and run start.bat from that folder.
-  echo Or download usb-maker.bat from the website.
-  echo Server must be running: %SERVER%
+  echo Download usb-maker.bat from the website and run that file.
   pause
   exit /b 1
 )
 
-powershell -STA -NoProfile -ExecutionPolicy Bypass -File "%~dp0usb_maker.ps1"
+powershell -STA -NoProfile -ExecutionPolicy Bypass -File "%~dp0usb_maker.ps1" -ServerUrl "%SERVER%" -Token "%TOKEN%"
 if errorlevel 1 (
   echo.
   echo GUI failed to start. See error above.

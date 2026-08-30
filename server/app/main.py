@@ -7,7 +7,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -430,13 +430,12 @@ def download_usb(token: str, db: Session = Depends(get_db)):
             p = WINPE / name
             if p.exists():
                 z.write(p, name)
+        z.writestr("start.bat", _usb_maker_bat_body(token).decode("ascii"))
         z.writestr(
             "HOW-TO.txt",
-            "This zip is not bootable. Write the USB with the maker tool:\n"
-            "1. Download /usb-maker.zip, run start.bat as Administrator (no Python needed).\n"
-            "2. Enter token, select USB. No ISO - Grok downloads Windows later.\n"
-            "3. In BIOS: Boot from USB. Internet required.\n"
-            f"4. PC appears on the website. Token: {token}\n",
+            "Run start.bat as Administrator. Token is already inside the file.\n"
+            "Select USB. No ISO - Grok downloads Windows later.\n"
+            "In BIOS: Boot from USB. Internet required.\n",
         )
     return Response(
         buf.getvalue(),
@@ -460,14 +459,10 @@ def _usb_maker_file(name: str) -> FileResponse:
     return FileResponse(_usb_maker_path(name), media_type="text/plain")
 
 
-@app.get("/usb-maker.ps1")
-def usb_maker_ps_gui():
-    return _usb_maker_file("usb_maker.ps1")
-
-
-@app.get("/usb-maker.bat")
-def usb_maker_bat():
+def _usb_maker_bat_body(token: str = "") -> bytes:
     url = settings.public_url.rstrip("/")
+    token = "".join(c for c in (token or "") if c.isalnum())
+    extra = " -Token \"%TOKEN%\"" if token else ""
     body = (
         "@echo off\r\n"
         "chcp 65001 >nul 2>&1\r\n"
@@ -481,6 +476,7 @@ def usb_maker_bat():
         "  exit /b\r\n"
         ")\r\n"
         f"set \"SERVER={url}\"\r\n"
+        f"set \"TOKEN={token}\"\r\n"
         "set \"PS=%TEMP%\\ai-pc-usb-maker.ps1\"\r\n"
         "echo Downloading from %SERVER% ...\r\n"
         "powershell -NoProfile -Command \"Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker.ps1' -OutFile '%TEMP%\\ai-pc-usb-maker.ps1'; Invoke-WebRequest -UseBasicParsing '%SERVER%/usb-maker/write_usb.ps1' -OutFile '%TEMP%\\write_usb.ps1'\"\r\n"
@@ -489,11 +485,21 @@ def usb_maker_bat():
         "  pause\r\n"
         "  exit /b 1\r\n"
         ")\r\n"
-        "powershell -STA -NoProfile -ExecutionPolicy Bypass -File \"%PS%\" -ServerUrl \"%SERVER%\"\r\n"
+        f"powershell -STA -NoProfile -ExecutionPolicy Bypass -File \"%PS%\" -ServerUrl \"%SERVER%\"{extra}\r\n"
         "if errorlevel 1 pause\r\n"
     )
+    return body.encode("ascii")
+
+
+@app.get("/usb-maker.ps1")
+def usb_maker_ps_gui():
+    return _usb_maker_file("usb_maker.ps1")
+
+
+@app.get("/usb-maker.bat")
+def usb_maker_bat(token: str = Query("")):
     return Response(
-        body.encode("utf-8"),
+        _usb_maker_bat_body(token),
         media_type="application/octet-stream",
         headers={"Content-Disposition": "attachment; filename=usb-maker.bat"},
     )
