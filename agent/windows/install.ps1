@@ -12,28 +12,40 @@ function Test-Admin {
   return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-if (-not $Token) {
-  Write-Host "Download install-agent.bat from the website and run as Administrator."
-  exit 1
+function Test-PipWorks($pyExe) {
+  if (-not (Test-Path $pyExe)) { return $false }
+  & $pyExe -m pip --version *>$null
+  return $LASTEXITCODE -eq 0
 }
 
-if (-not (Test-Admin)) {
-  $script = $MyInvocation.MyCommand.Path
-  $args = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Token `"$Token`" -Url `"$Url`""
-  if ($DeviceId) { $args += " -DeviceId `"$DeviceId`"" }
-  Start-Process powershell.exe -Verb RunAs -ArgumentList $args
-  exit
+function Install-Pip($pyExe) {
+  $getPip = Join-Path $env:TEMP "get-pip.py"
+  Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing
+  & $pyExe $getPip --no-warn-script-location
+  if ($LASTEXITCODE -ne 0) { throw "get-pip failed for $pyExe" }
 }
 
-function Ensure-Python($root) {
-  $cmd = Get-Command python -ErrorAction SilentlyContinue
-  if ($cmd) { return $cmd.Source }
+function Install-AgentDeps($pyExe) {
+  if (-not (Test-PipWorks $pyExe)) {
+    Write-Host "Installing pip..."
+    Install-Pip $pyExe
+  }
+  & $pyExe -m pip install websockets psutil --quiet
+  if ($LASTEXITCODE -ne 0) {
+    & $pyExe -m pip install websockets psutil
+  }
+  if ($LASTEXITCODE -ne 0) { throw "Could not install websockets/psutil" }
+}
 
+function Install-PortablePython($root) {
   $pyDir = Join-Path $root "python"
   $pyExe = Join-Path $pyDir "python.exe"
-  if (Test-Path $pyExe) { return $pyExe }
+  if (Test-Path $pyExe) {
+    Install-AgentDeps $pyExe
+    return $pyExe
+  }
 
-  Write-Host "Python not found. Downloading portable Python..."
+  Write-Host "Downloading portable Python..."
   New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
   $pyZip = Join-Path $env:TEMP "ai-pc-python-embed.zip"
   $pyUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
@@ -52,14 +64,36 @@ import site
 "@ | Set-Content $pth.FullName -Encoding ASCII
   }
 
-  & $pyExe -m pip install websockets psutil 2>$null
-  if ($LASTEXITCODE -ne 0) {
-    $getPip = Join-Path $env:TEMP "get-pip.py"
-    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing
-    & $pyExe $getPip --no-warn-script-location
-    & $pyExe -m pip install websockets psutil
-  }
+  Install-AgentDeps $pyExe
   return $pyExe
+}
+
+function Ensure-Python($root) {
+  $cmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($cmd) {
+    $pyExe = $cmd.Source
+    try {
+      Install-AgentDeps $pyExe
+      return $pyExe
+    } catch {
+      Write-Host "System Python is missing pip or packages: $($_.Exception.Message)"
+      Write-Host "Falling back to portable Python in $root ..."
+    }
+  }
+  return Install-PortablePython $root
+}
+
+if (-not $Token) {
+  Write-Host "Download install-agent.bat from the website and run as Administrator."
+  exit 1
+}
+
+if (-not (Test-Admin)) {
+  $script = $MyInvocation.MyCommand.Path
+  $args = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Token `"$Token`" -Url `"$Url`""
+  if ($DeviceId) { $args += " -DeviceId `"$DeviceId`"" }
+  Start-Process powershell.exe -Verb RunAs -ArgumentList $args
+  exit
 }
 
 $root = Join-Path $env:ProgramData "AIAgent"
@@ -69,7 +103,6 @@ Write-Host "Downloading agent from $Url ..."
 Invoke-WebRequest -Uri "$Url/agent.py" -OutFile (Join-Path $root "agent.py") -UseBasicParsing
 
 $python = Ensure-Python $root
-& $python -m pip install websockets psutil --quiet 2>$null
 
 @{ server_url = $Url.TrimEnd("/"); token = $Token } | ConvertTo-Json |
   Set-Content (Join-Path $root "config.json") -Encoding UTF8
