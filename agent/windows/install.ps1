@@ -12,50 +12,36 @@ function Test-Admin {
   return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Test-PipWorks($pyExe) {
-  if (-not (Test-Path $pyExe)) { return $false }
-  & $pyExe -m pip --version *>$null
-  return $LASTEXITCODE -eq 0
+function Invoke-Py([string]$PyExe, [string[]]$PyArgs) {
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  try {
+    $output = & $PyExe @PyArgs 2>&1
+    return @{ ExitCode = $LASTEXITCODE; Output = $output }
+  } finally {
+    $ErrorActionPreference = $prev
+  }
 }
 
-function Install-Pip($pyExe) {
+function Test-PipWorks([string]$PyExe) {
+  if (-not (Test-Path $PyExe)) { return $false }
+  return (Invoke-Py $PyExe @("-m", "pip", "--version")).ExitCode -eq 0
+}
+
+function Install-Pip([string]$PyExe) {
   $getPip = Join-Path $env:TEMP "get-pip.py"
-  Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing
-  & $pyExe $getPip --no-warn-script-location
-  if ($LASTEXITCODE -ne 0) { throw "get-pip failed for $pyExe" }
+  if (-not (Test-Path $getPip)) {
+    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing
+  }
+  $r = Invoke-Py $PyExe @($getPip, "--no-warn-script-location")
+  if ($r.ExitCode -ne 0) {
+    throw "get-pip failed: $($r.Output | Out-String)"
+  }
 }
 
-function Install-AgentDeps($pyExe) {
-  if (-not (Test-PipWorks $pyExe)) {
-    Write-Host "Installing pip..."
-    Install-Pip $pyExe
-  }
-  & $pyExe -m pip install websockets psutil --quiet
-  if ($LASTEXITCODE -ne 0) {
-    & $pyExe -m pip install websockets psutil
-  }
-  if ($LASTEXITCODE -ne 0) { throw "Could not install websockets/psutil" }
-}
-
-function Install-PortablePython($root) {
-  $pyDir = Join-Path $root "python"
-  $pyExe = Join-Path $pyDir "python.exe"
-  if (Test-Path $pyExe) {
-    Install-AgentDeps $pyExe
-    return $pyExe
-  }
-
-  Write-Host "Downloading portable Python..."
-  New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
-  $pyZip = Join-Path $env:TEMP "ai-pc-python-embed.zip"
-  $pyUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
-  Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
-  Expand-Archive -Path $pyZip -DestinationPath $pyDir -Force
-  Get-ChildItem "$env:SystemRoot\System32\vcruntime140*.dll", "$env:SystemRoot\System32\msvcp140.dll" -ErrorAction SilentlyContinue |
-    ForEach-Object { Copy-Item $_.FullName $pyDir -Force }
-
-  $pth = Get-ChildItem $pyDir -Filter "python*._pth" | Select-Object -First 1
-  $zipName = (Get-ChildItem $pyDir -Filter "python*.zip" | Select-Object -First 1).Name
+function Enable-EmbedSitePackages([string]$PyDir) {
+  $pth = Get-ChildItem $PyDir -Filter "python*._pth" -ErrorAction SilentlyContinue | Select-Object -First 1
+  $zipName = (Get-ChildItem $PyDir -Filter "python*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1).Name
   if ($pth -and $zipName) {
     @"
 $zipName
@@ -63,12 +49,53 @@ $zipName
 import site
 "@ | Set-Content $pth.FullName -Encoding ASCII
   }
+}
 
+function Install-AgentDeps([string]$PyExe) {
+  if (-not (Test-PipWorks $PyExe)) {
+    Write-Host "Installing pip..."
+    Install-Pip $PyExe
+  }
+  if (-not (Test-PipWorks $PyExe)) {
+    throw "pip is still unavailable after get-pip"
+  }
+
+  Write-Host "Installing agent packages..."
+  $r = Invoke-Py $PyExe @("-m", "pip", "install", "websockets", "psutil")
+  if ($r.ExitCode -ne 0) {
+    throw "pip install failed: $($r.Output | Out-String)"
+  }
+
+  $check = Invoke-Py $PyExe @("-c", "import websockets, psutil")
+  if ($check.ExitCode -ne 0) {
+    throw "package import failed: $($check.Output | Out-String)"
+  }
+}
+
+function Install-PortablePython([string]$Root) {
+  $pyDir = Join-Path $Root "python"
+  $pyExe = Join-Path $pyDir "python.exe"
+
+  if (-not (Test-Path $pyExe)) {
+    Write-Host "Downloading portable Python..."
+    if (Test-Path $pyDir) { Remove-Item $pyDir -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
+    $pyZip = Join-Path $env:TEMP "ai-pc-python-embed.zip"
+    $pyUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
+    Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
+    Expand-Archive -Path $pyZip -DestinationPath $pyDir -Force
+    Get-ChildItem "$env:SystemRoot\System32\vcruntime140*.dll", "$env:SystemRoot\System32\msvcp140.dll" -ErrorAction SilentlyContinue |
+      ForEach-Object { Copy-Item $_.FullName $pyDir -Force }
+  } else {
+    Write-Host "Using portable Python in $pyDir ..."
+  }
+
+  Enable-EmbedSitePackages $pyDir
   Install-AgentDeps $pyExe
   return $pyExe
 }
 
-function Ensure-Python($root) {
+function Ensure-Python([string]$Root) {
   $cmd = Get-Command python -ErrorAction SilentlyContinue
   if ($cmd) {
     $pyExe = $cmd.Source
@@ -76,11 +103,11 @@ function Ensure-Python($root) {
       Install-AgentDeps $pyExe
       return $pyExe
     } catch {
-      Write-Host "System Python is missing pip or packages: $($_.Exception.Message)"
-      Write-Host "Falling back to portable Python in $root ..."
+      Write-Host "System Python failed: $($_.Exception.Message)"
+      Write-Host "Falling back to portable Python in $Root ..."
     }
   }
-  return Install-PortablePython $root
+  return Install-PortablePython $Root
 }
 
 if (-not $Token) {
