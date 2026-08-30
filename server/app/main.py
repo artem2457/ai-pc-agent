@@ -28,7 +28,7 @@ from .db import (
     init_db,
 )
 from .hub import hub
-from .llm import llm_plan, troubleshooting_hint
+from .llm import MAX_TURNS, console_of, llm_next
 from .mcp import GROK_INSTRUCTIONS, handle_rpc, user_for_key
 from .mcp_auth import ensure_mcp_key, mcp_connect_url, mcp_public_url
 
@@ -319,25 +319,30 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
         hardware = json.loads(d.hardware or "{}")
     except json.JSONDecodeError:
         hardware = {}
-    steps = await llm_plan(text, d.os or "linux", hardware)
-    task = Task(device_pk=d.id, user_message=text, status="running", plan_json=json.dumps(steps, ensure_ascii=False))
+    task = Task(device_pk=d.id, user_message=text, status="running", plan_json="[]")
     db.add(task)
     db.commit()
     db.refresh(task)
-
-    lines = [f"План ({len(steps)} шагов):"]
-    for i, step in enumerate(steps, 1):
-        lines.append(f"{i}. {step['title']}")
-    db.add(ChatMessage(device_pk=d.id, role="assistant", content="\n".join(lines)))
-    db.commit()
 
     if not hub.is_online(d.device_id):
         task.status = "waiting_device"
         db.add(ChatMessage(device_pk=d.id, role="assistant", content="Устройство офлайн. Подключи агент — задача продолжится после появления."))
         db.commit()
-        return {"task_id": task.id, "status": task.status, "plan": steps}
+        return {"task_id": task.id, "status": task.status, "plan": []}
 
-    for step in steps:
+    history: list[dict] = []
+    executed: list[dict] = []
+    db.add(ChatMessage(device_pk=d.id, role="assistant", content="Смотрю задачу и буду идти по выводу консоли, без готового сценария."))
+    db.commit()
+
+    for _ in range(MAX_TURNS):
+        decision = await llm_next(text, d.os or "linux", hardware, history)
+        if decision.get("status") != "step":
+            db.add(ChatMessage(device_pk=d.id, role="assistant", content=decision.get("message") or "Готово."))
+            db.commit()
+            break
+
+        step = {"title": decision["title"], "action": decision["action"], "params": decision.get("params") or {}}
         db.add(ChatMessage(device_pk=d.id, role="assistant", content=f"→ {step['title']}"))
         db.commit()
         try:
@@ -346,31 +351,36 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
             task.status = "waiting_device"
             db.add(ChatMessage(device_pk=d.id, role="assistant", content="Связь с агентом пропала."))
             db.commit()
-            return {"task_id": task.id, "status": task.status, "plan": steps}
+            return {"task_id": task.id, "status": task.status, "plan": executed}
 
-        ok = result.get("exit_code") == 0
-        mark = "✓" if ok else "⚠"
-        snippet = (result.get("stdout") or result.get("stderr") or "")[-500:]
-        db.add(ChatMessage(device_pk=d.id, role="assistant", content=f"{mark} {step['title']}\n{snippet}"))
+        console = console_of(result)
+        exit_code = result.get("exit_code")
+        mark = "✓" if exit_code == 0 else "⚠"
+        body = f"{mark} {step['title']}  (exit {exit_code})"
+        if console:
+            body += f"\n\nконсоль:\n{console[-4000:]}"
+        db.add(ChatMessage(device_pk=d.id, role="assistant", content=body))
         db.commit()
-        if not ok:
-            fix = troubleshooting_hint(step, result)
-            if fix:
-                db.add(ChatMessage(device_pk=d.id, role="assistant", content=f"Пробую исправить: {fix['title']}"))
-                db.commit()
-                try:
-                    await hub.send_command(db, d, fix["action"], fix.get("params") or {}, task_id=task.id)
-                    result = await hub.send_command(db, d, step["action"], step.get("params") or {}, task_id=task.id)
-                    ok2 = result.get("exit_code") == 0
-                    db.add(ChatMessage(device_pk=d.id, role="assistant", content=("✓ Исправлено" if ok2 else "⚠ Не получилось автоматически")))
-                    db.commit()
-                except RuntimeError:
-                    pass
+
+        history.append(
+            {
+                "title": step["title"],
+                "action": step["action"],
+                "params": step.get("params") or {},
+                "exit_code": exit_code,
+                "console": console,
+            }
+        )
+        executed.append(step)
+        task.plan_json = json.dumps(executed, ensure_ascii=False)
+        db.commit()
+    else:
+        db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: слишком много шагов. Смотри лог выше."))
+        db.commit()
 
     task.status = "done"
-    db.add(ChatMessage(device_pk=d.id, role="assistant", content="Готово."))
     db.commit()
-    return {"task_id": task.id, "status": "done", "plan": steps}
+    return {"task_id": task.id, "status": "done", "plan": executed}
 
 
 @app.post("/api/devices/{device_id}/chat")

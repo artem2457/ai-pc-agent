@@ -11,6 +11,7 @@ ALLOWED_ACTIONS = {
     "get_hardware",
     "get_system_info",
     "install_package",
+    "uninstall_package",
     "download_file",
     "reboot",
     "shutdown",
@@ -19,7 +20,22 @@ ALLOWED_ACTIONS = {
     "partition_disk",
 }
 
+MAX_TURNS = 8
+CONSOLE_KEEP = 6000
+
 PRODUCT_KEY = re.compile(r"\b(?:[A-Z0-9]{5}-){4}[A-Z0-9]{5}\b", re.I)
+INSTALL_RE = re.compile(
+    r"(?:установи(?:ть)?|поставь|поставить|install|скачай|скачать)\s+(.+)",
+    re.I,
+)
+UNINSTALL_RE = re.compile(
+    r"(?:удали(?:ть)?|деинсталл\w*|uninstall|remove)\s+(.+)",
+    re.I,
+)
+POWER_RE = re.compile(
+    r"перезагруз|reboot|restart|выключи|shutdown|выключить\s+(комп|пк|компьютер)",
+    re.I,
+)
 
 PROFILES = {
     "programmer": {
@@ -102,6 +118,61 @@ def extract_product_key(text: str) -> str | None:
     return m.group(0).upper() if m else None
 
 
+def wants_power_cycle(text: str) -> bool:
+    return bool(POWER_RE.search(text or ""))
+
+
+def extract_target(text: str) -> str:
+    raw = (text or "").strip()
+    for rx in (UNINSTALL_RE, INSTALL_RE):
+        m = rx.search(raw)
+        if m:
+            return m.group(1).strip(" .!«»\"'")
+    return raw
+
+
+def is_uninstall(text: str) -> bool:
+    return bool(UNINSTALL_RE.search(text or ""))
+
+
+def console_of(result: dict) -> str:
+    parts = [result.get("stdout") or "", result.get("stderr") or ""]
+    text = "\n".join(p for p in parts if p).strip()
+    return text[-CONSOLE_KEEP:]
+
+
+def format_history(history: list[dict]) -> str:
+    if not history:
+        return "(команд ещё не было)"
+    blocks = []
+    for i, item in enumerate(history, 1):
+        blocks.append(
+            f"#{i} {item.get('title')} | action={item.get('action')} | exit={item.get('exit_code')}\n"
+            f"{item.get('console') or '(пусто)'}"
+        )
+    return "\n\n".join(blocks)
+
+
+def sanitize_step(step: dict | None, user_text: str) -> dict | None:
+    if not step or not isinstance(step, dict):
+        return None
+    action = step.get("action")
+    if action not in ALLOWED_ACTIONS:
+        return None
+    if action in ("reboot", "shutdown") and not wants_power_cycle(user_text):
+        return None
+    params = step.get("params") if isinstance(step.get("params"), dict) else {}
+    if action == "download_file":
+        url = str(params.get("url") or "")
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return None
+    return {
+        "title": str(step.get("title") or action)[:120],
+        "action": action,
+        "params": params,
+    }
+
+
 def fallback_plan(text: str, os_name: str) -> list[dict]:
     fam = family(os_name)
     profile = detect_profile(text)
@@ -143,33 +214,128 @@ def fallback_plan(text: str, os_name: str) -> list[dict]:
     for pkg in packages:
         steps.append({"title": f"Установка {pkg}", "action": "install_package", "params": {"name": pkg}})
     if len(steps) == 1:
-        # generic shell/powershell from remaining text
-        if fam == "windows":
-            steps.append({"title": "Выполнить задачу", "action": "run_powershell", "params": {"script": "Write-Output 'Нет точного плана; проверьте формулировку'"}})
+        target = extract_target(text)
+        if is_uninstall(text):
+            steps.append({"title": f"Удаление {target}", "action": "uninstall_package", "params": {"name": target}})
+        elif INSTALL_RE.search(text or ""):
+            steps.append({"title": f"Установка {target}", "action": "install_package", "params": {"name": target}})
+        elif fam == "windows":
+            steps.append({"title": "Выполнить задачу", "action": "run_powershell", "params": {"script": text}})
         else:
-            steps.append({"title": "Выполнить задачу", "action": "run_shell", "params": {"script": "uname -a"}})
-    return steps
+            steps.append({"title": "Выполнить задачу", "action": "run_shell", "params": {"script": text}})
+    return [s for s in steps if sanitize_step(s, text)]
 
 
-async def llm_plan(text: str, os_name: str, hardware: dict) -> list[dict]:
-    if not settings.openai_api_key:
-        return fallback_plan(text, os_name)
+def fallback_next(text: str, os_name: str, history: list[dict]) -> dict:
+    fam = family(os_name)
+    target = extract_target(text)
+    run_action = "run_powershell" if fam == "windows" else "run_shell"
 
+    if not history:
+        step = None
+        if is_uninstall(text):
+            step = {"title": f"Удаление {target}", "action": "uninstall_package", "params": {"name": target}}
+        elif INSTALL_RE.search(text or ""):
+            step = {"title": f"Установка {target}", "action": "install_package", "params": {"name": target}}
+        else:
+            plan = fallback_plan(text, os_name)
+            step = plan[0] if plan else None
+        clean = sanitize_step(step, text)
+        if clean:
+            return {"status": "step", **clean}
+        return {"status": "done", "message": "Не понял задачу."}
+
+    last = history[-1]
+    console = (last.get("console") or "").lower()
+    code = last.get("exit_code")
+
+    if code == 0:
+        if last.get("action") in ("install_package", "uninstall_package"):
+            already_checked = any(str(h.get("title") or "").startswith("Проверка") for h in history)
+            if not already_checked:
+                if fam == "windows":
+                    script = f"winget list --name {target} --source winget --disable-interactivity"
+                else:
+                    script = f"command -v {target} || dpkg -l | grep -i {target} | head"
+                step = sanitize_step(
+                    {"title": "Проверка по выводу системы", "action": run_action, "params": {"script": script}},
+                    text,
+                )
+                if step:
+                    return {"status": "step", **step}
+        return {"status": "done", "message": "Готово. Последняя команда завершилась успешно."}
+
+    tried = {h.get("action") for h in history}
+    if last.get("action") == "download_file" or "404" in console:
+        step = sanitize_step(
+            {"title": f"Установка через пакетный менеджер: {target}", "action": "install_package", "params": {"name": target}},
+            text,
+        )
+        if step and "install_package" not in tried:
+            return {"status": "step", **step}
+
+    if fam == "windows" and any(x in console for x in ("msstore", "0x8a150044", "rest api", "источнике")):
+        op = "uninstall" if is_uninstall(text) else "install"
+        extra = "--accept-package-agreements --accept-source-agreements" if op == "install" else ""
+        script = (
+            f"winget {op} --name {target} --source winget --disable-interactivity {extra}".strip()
+        )
+        step = sanitize_step({"title": "Повтор через winget (источник winget)", "action": "run_powershell", "params": {"script": script}}, text)
+        if step:
+            return {"status": "step", **step}
+
+    if last.get("action") == "install_package" and fam == "windows":
+        script = f"winget search {target} --source winget --disable-interactivity"
+        step = sanitize_step({"title": "Поиск пакета в winget по выводу ошибки", "action": "run_powershell", "params": {"script": script}}, text)
+        if step and not any(h.get("title", "").startswith("Поиск пакета") for h in history):
+            return {"status": "step", **step}
+
+    return {
+        "status": "done",
+        "message": "Остановился: по логу команда не удалась, повтор того же шага смысла нет.\n" + (last.get("console") or "")[-1500:],
+    }
+
+
+async def llm_next(text: str, os_name: str, hardware: dict, history: list[dict]) -> dict:
+    if settings.openai_api_key:
+        decided = await _llm_next_api(text, os_name, hardware, history)
+        if decided:
+            if decided.get("status") == "done":
+                return decided
+            step = sanitize_step(decided, text)
+            if step:
+                return {"status": "step", **step}
+    return fallback_next(text, os_name, history)
+
+
+async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[dict]) -> dict | None:
     fam = family(os_name)
     run_action = "run_powershell" if fam == "windows" else "run_shell"
-    prompt = f"""Ты оркестратор установки компьютера.
-ОС агента: {os_name} (семейство {fam}).
-Железо: {json.dumps(hardware, ensure_ascii=False)[:1500]}
+    prompt = f"""Ты оператор ПК. Не строй длинный план заранее.
+
+ОС: {os_name} ({fam})
+Железо: {json.dumps(hardware, ensure_ascii=False)[:1200]}
 Задача пользователя: {text}
 
-Верни ТОЛЬКО JSON-массив шагов:
-[{{"title":"...","action":"...","params":{{}}}}]
+Журнал уже выполненных команд и ИХ КОНСОЛЬНЫЙ ВЫВОД:
+{format_history(history)}
+
+Правила:
+- Смотри именно на вывод консоли. Если ошибка — смени подход, не повторяй ту же команду.
+- Один ход = одно действие, либо завершение.
+- reboot/shutdown ЗАПРЕЩЕНЫ, если пользователь сам не просил перезагрузку или выключение.
+- Не выдумывай URL. Для программ используй install_package / uninstall_package (Windows = winget, Linux = apt).
+- Имя пакета бери из запроса пользователя. Работает для ЛЮБОГО приложения, не только известных.
+- download_file только с реальным http(s) URL из задачи или из лога, не с выдуманного.
+- Если задача уже сделана по логу — status=done и кратко опиши результат по логу.
 
 Разрешённые action: {sorted(ALLOWED_ACTIONS)}
-Для Windows ставь пакеты через install_package с id winget.
-Для Linux — имя apt-пакета.
-Для произвольных команд используй {run_action} с params.script.
-Не больше 12 шагов. Без markdown."""
+Для произвольной команды: {run_action} с params.script.
+
+Верни ТОЛЬКО JSON, без markdown:
+{{"status":"step","title":"...","action":"...","params":{{}}}}
+или
+{{"status":"done","message":"..."}}"""
 
     try:
         async with httpx.AsyncClient(timeout=45) as client:
@@ -179,7 +345,7 @@ async def llm_plan(text: str, os_name: str, hardware: dict) -> list[dict]:
                 json={
                     "model": settings.openai_model,
                     "messages": [
-                        {"role": "system", "content": "Отвечай только JSON-массивом шагов."},
+                        {"role": "system", "content": "Отвечай только JSON-объектом одного хода."},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
@@ -187,40 +353,31 @@ async def llm_plan(text: str, os_name: str, hardware: dict) -> list[dict]:
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
-        match = re.search(r"\[.*\]", content, re.S)
+        match = re.search(r"\{.*\}", content, re.S)
         raw = json.loads(match.group(0) if match else content)
-        steps = []
-        for item in raw[:12]:
-            action = item.get("action")
-            if action not in ALLOWED_ACTIONS:
-                continue
-            steps.append(
-                {
-                    "title": str(item.get("title") or action)[:120],
-                    "action": action,
-                    "params": item.get("params") or {},
-                }
-            )
-        return steps or fallback_plan(text, os_name)
+        if not isinstance(raw, dict):
+            return None
+        if str(raw.get("status") or "").lower() == "done":
+            return {"status": "done", "message": str(raw.get("message") or "Готово.")[:4000]}
+        action = raw.get("action")
+        if action not in ALLOWED_ACTIONS:
+            return None
+        return {
+            "status": "step",
+            "title": str(raw.get("title") or action)[:120],
+            "action": action,
+            "params": raw.get("params") if isinstance(raw.get("params"), dict) else {},
+        }
     except Exception:
-        return fallback_plan(text, os_name)
+        return None
+
+
+async def llm_plan(text: str, os_name: str, hardware: dict) -> list[dict]:
+    first = await llm_next(text, os_name, hardware, [])
+    if first.get("status") == "step":
+        return [{"title": first["title"], "action": first["action"], "params": first.get("params") or {}}]
+    return fallback_plan(text, os_name)
 
 
 def troubleshooting_hint(step: dict, result: dict) -> dict | None:
-    stderr = (result.get("stderr") or "") + " " + (result.get("stdout") or "")
-    low = stderr.lower()
-    if result.get("exit_code") == 0:
-        return None
-    if "wsl" in low and "kernel" in low:
-        return {
-            "title": "Исправление WSL",
-            "action": step.get("action"),
-            "params": {"script": "wsl --update"} if step.get("action") in ("run_powershell", "run_shell") else step.get("params"),
-        }
-    if "lock" in low or "dpkg" in low:
-        return {
-            "title": "Снять apt lock и повторить",
-            "action": "run_shell",
-            "params": {"script": "dpkg --configure -a || true"},
-        }
     return None

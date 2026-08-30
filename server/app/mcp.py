@@ -12,12 +12,11 @@ from .hub import hub
 STDOUT_TAIL = 4000
 
 GROK_INSTRUCTIONS = (
-    "AI PC Agent: Grok Bot is the brain; this MCP server is the hands on a physical PC. "
-    "Always call list_devices first. Use execute_command for shell/PowerShell — results are JSON "
-    "(exit_code, stdout_tail, stderr_tail), never terminal screenshots. "
-    "Use get_logs for full output when truncated. "
-    "Grok may use its own browser to find official download URLs, then download_file on the device. "
-    "Prefer structured tools over get_screen."
+    "AI PC Agent: you are the brain; this MCP server is the hands on a physical PC. "
+    "Always call list_devices first. After each tool call READ stdout_tail/stderr_tail and decide the next tool. "
+    "Do not invent a long plan in advance. Do not reboot unless the user asked. "
+    "Do not invent download URLs. Install/uninstall any app via install_package/uninstall_package. "
+    "Results are JSON logs, never screenshots."
 )
 
 TOOLS = [
@@ -98,7 +97,16 @@ TOOLS = [
     },
     {
         "name": "install_package",
-        "description": "Install a package (winget id on Windows, apt name on Linux).",
+        "description": "Install any package via the OS package manager (winget on Windows, apt on Linux). Pass the name from the user request. Read stdout/stderr and retry with a different name if needed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"device_id": {"type": "string"}, "name": {"type": "string"}},
+            "required": ["device_id", "name"],
+        },
+    },
+    {
+        "name": "uninstall_package",
+        "description": "Uninstall a package via winget/apt/dnf. Pass the name from the user request.",
         "inputSchema": {
             "type": "object",
             "properties": {"device_id": {"type": "string"}, "name": {"type": "string"}},
@@ -285,6 +293,8 @@ async def run_tool(db: Session, owner_id: int, name: str, args: dict) -> dict:
         )
     if name == "install_package":
         return await go("install_package", {"name": args.get("name")})
+    if name == "uninstall_package":
+        return await go("uninstall_package", {"name": args.get("name")})
     if name == "install_os":
         return await go(
             "install_windows",

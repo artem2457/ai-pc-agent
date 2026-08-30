@@ -31,6 +31,7 @@ ALLOWED = {
     "get_hardware",
     "get_system_info",
     "install_package",
+    "uninstall_package",
     "download_file",
     "reboot",
     "shutdown",
@@ -240,16 +241,68 @@ def run(cmd: list[str] | str, shell=False, timeout=170) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
+def _join_logs(chunks: list[str]) -> str:
+    return "\n\n".join(c for c in chunks if c).strip()
+
+
+def _winget_try(commands: list[list[str]]) -> tuple[int, str, str]:
+    logs: list[str] = []
+    last = (1, "", "winget failed")
+    for cmd in commands:
+        code, out, err = run(cmd, timeout=600)
+        block = f"$ {' '.join(cmd)}\n{out}\n{err}".strip()
+        logs.append(block)
+        last = (code, _join_logs(logs), err)
+        if code == 0:
+            return 0, _join_logs(logs), err
+    return last
+
+
 def install_package(name: str, os_name: str) -> tuple[int, str, str]:
+    name = (name or "").strip()
+    if not name:
+        return 1, "", "empty package name"
     if os_name in ("windows", "winpe"):
         if shutil.which("winget"):
-            return run(["winget", "install", "-e", "--id", name, "--accept-package-agreements", "--accept-source-agreements"])
-        return run(["choco", "install", name, "-y"])
+            return _winget_try(
+                [
+                    ["winget", "install", "--id", name, "-e", "--source", "winget", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
+                    ["winget", "install", "--name", name, "--source", "winget", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
+                    ["winget", "install", name, "--source", "winget", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
+                ]
+            )
+        if shutil.which("choco"):
+            return run(["choco", "install", name, "-y"], timeout=600)
+        return 1, "", "no package manager"
     if shutil.which("apt-get"):
         cmd = f"export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y {name}"
-        return run(cmd, shell=True)
+        return run(cmd, shell=True, timeout=600)
     if shutil.which("dnf"):
-        return run(["dnf", "install", "-y", name])
+        return run(["dnf", "install", "-y", name], timeout=600)
+    return 1, "", "no package manager"
+
+
+def uninstall_package(name: str, os_name: str) -> tuple[int, str, str]:
+    name = (name or "").strip()
+    if not name:
+        return 1, "", "empty package name"
+    if os_name in ("windows", "winpe"):
+        if shutil.which("winget"):
+            return _winget_try(
+                [
+                    ["winget", "uninstall", "--id", name, "-e", "--source", "winget", "--disable-interactivity"],
+                    ["winget", "uninstall", "--name", name, "--source", "winget", "--disable-interactivity"],
+                    ["winget", "uninstall", name, "--disable-interactivity"],
+                ]
+            )
+        if shutil.which("choco"):
+            return run(["choco", "uninstall", name, "-y"], timeout=600)
+        return 1, "", "no package manager"
+    if shutil.which("apt-get"):
+        cmd = f"export DEBIAN_FRONTEND=noninteractive; apt-get remove -y {name}"
+        return run(cmd, shell=True, timeout=600)
+    if shutil.which("dnf"):
+        return run(["dnf", "remove", "-y", name], timeout=600)
     return 1, "", "no package manager"
 
 
@@ -261,14 +314,19 @@ def handle(action: str, params: dict, os_name: str) -> dict:
         return {"exit_code": 0, "stdout": json.dumps(data, ensure_ascii=False, indent=2), "stderr": "", "data": data}
     if action == "run_powershell":
         script = params.get("script") or "Write-Output 'ok'"
-        code, out, err = run(["powershell", "-NoProfile", "-Command", script])
+        slow = any(w in script.lower() for w in ("winget", "choco", "msiexec", "setup.exe"))
+        code, out, err = run(["powershell", "-NoProfile", "-Command", script], timeout=600 if slow else 170)
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
     if action == "run_shell":
         script = params.get("script") or "uname -a"
-        code, out, err = run(script, shell=True)
+        slow = any(w in script.lower() for w in ("apt-get", "dnf", "yum", "pacman", "winget"))
+        code, out, err = run(script, shell=True, timeout=600 if slow else 170)
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
     if action == "install_package":
         code, out, err = install_package(params.get("name") or "", os_name)
+        return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
+    if action == "uninstall_package":
+        code, out, err = uninstall_package(params.get("name") or "", os_name)
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
     if action == "download_file":
         url = params.get("url")
