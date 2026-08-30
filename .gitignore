@@ -1,5 +1,6 @@
 data/
 .env
+.env-server
 __pycache__/
 *.pyc
 .pytest_cache/

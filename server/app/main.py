@@ -29,7 +29,8 @@ from .db import (
 )
 from .hub import hub
 from .llm import llm_plan, troubleshooting_hint
-from .mcp import handle_rpc, user_for_key
+from .mcp import GROK_INSTRUCTIONS, handle_rpc, user_for_key
+from .mcp_auth import ensure_mcp_key, mcp_connect_url, mcp_public_url
 
 WEB = ROOT / "web"
 WINPE = ROOT / "winpe"
@@ -90,6 +91,31 @@ def device_out(d: Device):
     }
 
 
+@app.get("/api/config")
+def public_config():
+    return {
+        "brain": "grok_mcp",
+        "tagline": "Мозг — Grok Bot. Руки — агент. JSON команд, не скриншот терминала.",
+        "mcp_path": "/mcp",
+        "public_url": settings.public_url,
+        "grok_connectors": "https://grok.com/connectors",
+        "instructions": GROK_INSTRUCTIONS,
+    }
+
+
+@app.get("/.well-known/oauth-protected-resource")
+@app.get("/.well-known/oauth-protected-resource/mcp")
+def oauth_protected_resource():
+    resource = mcp_public_url()
+    return {
+        "resource": resource,
+        "authorization_servers": [],
+        "bearer_methods_supported": ["header", "query"],
+        "resource_documentation": settings.public_url,
+        "note": "Static Bearer MCP key from the web UI. No OAuth — use Authorization: Bearer <mcp_key> or ?key= on the MCP URL.",
+    }
+
+
 @app.post("/api/register")
 def register(body: AuthIn, db: Session = Depends(get_db)):
     email = body.email.strip().lower()
@@ -101,7 +127,13 @@ def register(body: AuthIn, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"token": make_token(user.id), "email": user.email}
+    mcp_key = ensure_mcp_key(db, user.id)
+    return {
+        "token": make_token(user.id),
+        "email": user.email,
+        "mcp_url": mcp_public_url(),
+        "mcp_connect_url": mcp_connect_url(mcp_key),
+    }
 
 
 @app.post("/api/login")
@@ -115,13 +147,16 @@ def login(body: AuthIn, db: Session = Depends(get_db)):
 
 @app.get("/api/me")
 def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    row = db.query(McpKey).filter(McpKey.owner_id == user.id).first()
+    mcp_key = ensure_mcp_key(db, user.id)
     return {
         "email": user.email,
         "id": user.id,
-        "mcp_url": f"{settings.public_url}/mcp",
-        "mcp_key": row.key if row else None,
-        "grok_hint": "В Grok: Custom MCP connector → URL + Bearer ключ. Мозг — Grok, руки — агент на ПК.",
+        "brain": "grok_mcp",
+        "mcp_url": mcp_public_url(),
+        "mcp_key": mcp_key,
+        "mcp_connect_url": mcp_connect_url(mcp_key),
+        "grok_connectors": "https://grok.com/connectors",
+        "tagline": "Мозг — Grok Bot. Руки — агент. JSON команд, не скриншот терминала.",
     }
 
 
@@ -131,7 +166,11 @@ def create_mcp_key(user: User = Depends(current_user), db: Session = Depends(get
     key = secrets.token_urlsafe(24)
     db.add(McpKey(owner_id=user.id, key=key))
     db.commit()
-    return {"mcp_url": f"{settings.public_url}/mcp", "mcp_key": key}
+    return {
+        "mcp_url": mcp_public_url(),
+        "mcp_key": key,
+        "mcp_connect_url": mcp_connect_url(key),
+    }
 
 
 def mcp_owner(request: Request, authorization: str | None, db: Session) -> int:
@@ -202,11 +241,13 @@ async def mcp_get(request: Request):
         )
     return {
         "name": "ai-pc-agent",
+        "brain": "grok_mcp",
         "protocol": "MCP Streamable HTTP + JSON-RPC 2.0",
         "post": "/mcp",
-        "auth": "Authorization: Bearer <mcp_key>",
-        "grok": "https://grok.com/connectors → Custom → этот URL + Bearer ключ",
-        "note": "Grok calls tools; commands run on the physical PC via the USB agent. Results are JSON, not screenshots.",
+        "auth": "Authorization: Bearer <mcp_key> or ?key=<mcp_key>",
+        "auth_note": "No OAuth. Get the key at the web UI after login.",
+        "grok": "https://grok.com/connectors → Custom → mcp_connect_url from /api/me",
+        "instructions": GROK_INSTRUCTIONS,
     }
 
 

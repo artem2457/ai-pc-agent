@@ -11,6 +11,15 @@ from .hub import hub
 
 STDOUT_TAIL = 4000
 
+GROK_INSTRUCTIONS = (
+    "AI PC Agent: Grok Bot is the brain; this MCP server is the hands on a physical PC. "
+    "Always call list_devices first. Use execute_command for shell/PowerShell — results are JSON "
+    "(exit_code, stdout_tail, stderr_tail), never terminal screenshots. "
+    "Use get_logs for full output when truncated. "
+    "Grok may use its own browser to find official download URLs, then download_file on the device. "
+    "Prefer structured tools over get_screen."
+)
+
 TOOLS = [
     {
         "name": "list_devices",
@@ -190,9 +199,11 @@ def pack_result(result: dict, log_id: str | None = None) -> dict:
 
 
 def user_for_key(db: Session, key: str) -> int:
+    from .mcp_auth import mcp_bearer_challenge
+
     row = db.query(McpKey).filter(McpKey.key == key).first()
     if not row:
-        raise HTTPException(401, "Неверный MCP-ключ")
+        raise mcp_bearer_challenge()
     return row.owner_id
 
 
@@ -308,13 +319,8 @@ async def handle_rpc(db: Session, owner_id: int, body: dict) -> dict:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {
                     "name": "ai-pc-agent",
-                    "version": "0.1.0",
-                    "instructions": (
-                        "These tools control a physical PC via a USB/Windows agent. "
-                        "Always start with list_devices. Prefer execute_command over get_screen. "
-                        "Command results are JSON with exit_code and stdout_tail, not screenshots. "
-                        "Use get_logs if stdout was truncated. Windows ISO is the owner's file on USB."
-                    ),
+                    "version": "0.2.0",
+                    "instructions": GROK_INSTRUCTIONS,
                 },
             },
         }

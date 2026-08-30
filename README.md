@@ -30,13 +30,15 @@ PUBLIC_URL=https://твой-домен-или-ngrok
 
 И пробрось порт (cloudflared / ngrok / свой VPS). Localhost Grok не увидит.
 
-## Grok Bot (основной мозг)
+## Grok Bot (основной мозг — глобально для приложения)
 
-1. На сайте: **Создать MCP-ключ**
-2. [grok.com/connectors](https://grok.com/connectors) → New Connector → Custom
-3. URL: `{PUBLIC_URL}/mcp`
-4. Auth: `Authorization: Bearer <mcp_key>`
-5. Open in Grok → «поставь Docker на мой ПК» / «установи Windows, ключ …»
+**Мозг — Grok Bot. Руки — агент. JSON команд, не скриншот терминала.**
+
+1. На сайте: войди — MCP-ключ создаётся автоматически
+2. [grok.com/connectors](https://grok.com/connectors) → Custom
+3. **Server-URL:** `{PUBLIC_URL}/mcp?key=<mcp_key>` (удобно для Grok web UI)
+4. Или URL `{PUBLIC_URL}/mcp` + `Authorization: Bearer <mcp_key>`
+5. Open in Grok → «list_devices» → «execute_command ipconfig на моём ПК»
 
 Инструменты: `list_devices`, `get_hardware`, `execute_command`, `read_file`, `write_file`, `upload_file`, `download_file`, `install_package`, `install_os`, `get_processes`, `get_services`, `get_logs`, `reboot`, `shutdown`, `get_screen` (запасной).
 
