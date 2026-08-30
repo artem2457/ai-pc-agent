@@ -143,10 +143,11 @@ class MiniWS:
         return buf
 
     def _read_frame(self):
-        b1, b2 = self._read_exact(2)
-        opcode = b1[0] & 0x0F
-        masked = b2[0] >> 7
-        n = b2[0] & 0x7F
+        data = self._read_exact(2)
+        b1, b2 = data[0], data[1]
+        opcode = b1 & 0x0F
+        masked = b2 >> 7
+        n = b2 & 0x7F
         if n == 126:
             n = struct.unpack("!H", self._read_exact(2))[0]
         elif n == 127:
@@ -430,14 +431,45 @@ def register_payload(token: str, device_id: str, os_name: str, hw: dict) -> dict
     }
 
 
-def loop_sync(url: str, token: str, device_id: str):
-    os_name = detect_os()
-    hw = hardware()
-    print(f"AI PC Agent v{VERSION}")
-    ok("Network connected")
-    ok(f"Device ID: {device_id}")
-    ok(f"OS: {os_name}")
-    print("Waiting for commands...", flush=True)
+def loop_websockets(url: str, token: str, device_id: str, os_name: str, hw: dict):
+    import asyncio
+
+    async def run_once(ws):
+        await ws.send(json.dumps(register_payload(token, device_id, os_name, hw)))
+        ack = json.loads(await ws.recv())
+        ok(f"Server connected ({ack.get('device_id', device_id)})")
+        async for raw in ws:
+            msg = json.loads(raw)
+            if msg.get("type") != "command":
+                continue
+            print(f"SERVER → {msg.get('action')}", flush=True)
+            result = handle(msg.get("action"), msg.get("params") or {}, os_name)
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "result",
+                        "command_id": msg.get("id"),
+                        "exit_code": result["exit_code"],
+                        "stdout": result["stdout"],
+                        "stderr": result["stderr"],
+                        "data": result.get("data") or {},
+                    }
+                )
+            )
+
+    async def main_loop():
+        while True:
+            try:
+                async with websockets.connect(url, ping_interval=30, ping_timeout=30) as ws:
+                    await run_once(ws)
+            except Exception as e:
+                print(f"[WAIT] reconnect in 5s: {e}", flush=True)
+                await asyncio.sleep(5)
+
+    asyncio.run(main_loop())
+
+
+def loop_miniws(url: str, token: str, device_id: str, os_name: str, hw: dict):
     while True:
         ws = None
         try:
@@ -471,6 +503,20 @@ def loop_sync(url: str, token: str, device_id: str):
                 ws.close()
 
 
+def loop_sync(url: str, token: str, device_id: str):
+    os_name = detect_os()
+    hw = hardware()
+    print(f"AI PC Agent v{VERSION}")
+    ok("Network connected")
+    ok(f"Device ID: {device_id}")
+    ok(f"OS: {os_name}")
+    print("Waiting for commands...", flush=True)
+    if websockets is not None:
+        loop_websockets(url, token, device_id, os_name, hw)
+    else:
+        loop_miniws(url, token, device_id, os_name, hw)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=os.environ.get("AGENT_URL", "http://localhost:8000"))
@@ -482,7 +528,7 @@ def main():
     token = args.token or cfg.get("token") or ""
     url = args.url or cfg.get("server_url") or "http://localhost:8000"
     if not token:
-        print("Нужен --token (с сайта: Создать флешку / токен)")
+        print("Need --token (download install-agent.bat from the website)")
         sys.exit(1)
     base = url.rstrip("/")
     if base.startswith("http://"):
