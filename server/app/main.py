@@ -15,18 +15,21 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .auth import current_user, hash_password, make_token, verify_password
+from .computer_use import desktop_goal_met, needs_desktop, run_computer_use, see_and_act
 from .config import ROOT, settings
 from .db import (
     ChatMessage,
     CommandLog,
     Device,
     Enrollment,
+    Escalation,
     McpKey,
     Task,
     User,
     get_db,
     init_db,
 )
+from .escalation import chat_succeeded, escalate_to_grok
 from .hub import hub
 from .llm import MAX_TURNS, already_tried, console_of, llm_next
 from .mcp import GROK_INSTRUCTIONS, handle_rpc, user_for_key
@@ -312,7 +315,7 @@ async def send_command(
     return result
 
 
-async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
+async def run_chat_for_device(db: Session, d: Device, text: str, owner_id: int) -> dict:
     db.add(ChatMessage(device_pk=d.id, role="user", content=text))
     db.commit()
     try:
@@ -328,22 +331,45 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
         task.status = "waiting_device"
         db.add(ChatMessage(device_pk=d.id, role="assistant", content="Устройство офлайн. Подключи агент — задача продолжится после появления."))
         db.commit()
-        return {"task_id": task.id, "status": task.status, "plan": []}
+        return {"task_id": task.id, "status": task.status, "plan": [], "escalated": False}
 
     history: list[dict] = []
     executed: list[dict] = []
-    db.add(ChatMessage(device_pk=d.id, role="assistant", content="Выполняю задачу на этом ПК — смотрю вывод консоли и иду дальше по логу."))
+    fail_reason = ""
+    db.add(ChatMessage(device_pk=d.id, role="assistant", content="Выполняю на этом ПК: консоль и экран — когда задаче нужно окно или ввод в программу."))
     db.commit()
 
     for _ in range(MAX_TURNS):
         decision = await llm_next(text, d.os or "linux", hardware, history)
         if decision.get("status") != "step":
-            db.add(ChatMessage(device_pk=d.id, role="assistant", content=decision.get("message") or "Готово."))
-            db.commit()
-            break
+            if needs_desktop(text) and not desktop_goal_met(text, history):
+                decision = {"status": "step", "title": "Смотрю экран", "action": "get_screen", "params": {}}
+            else:
+                if history and not chat_succeeded(history) and not desktop_goal_met(text, history):
+                    fail_reason = decision.get("message") or "локальный бот не завершил задачу"
+                db.add(ChatMessage(device_pk=d.id, role="assistant", content=decision.get("message") or "Готово."))
+                db.commit()
+                break
 
         step = {"title": decision["title"], "action": decision["action"], "params": decision.get("params") or {}}
+        if step["action"] == "get_screen":
+            seen = await see_and_act(db, device=d, task=task, user_message=text, history=history)
+            executed.extend(seen.get("executed") or [])
+            history.extend(seen.get("history_items") or [])
+            task.plan_json = json.dumps(executed, ensure_ascii=False)
+            db.commit()
+            if seen.get("finished"):
+                if seen.get("ok") and desktop_goal_met(text, history):
+                    break
+                if seen.get("ok") and not needs_desktop(text):
+                    break
+                if not seen.get("ok"):
+                    fail_reason = seen.get("message") or "экран не помог"
+                    break
+            continue
+
         if already_tried(step, history):
+            fail_reason = "повтор шага не помог"
             db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: этот шаг уже был, повтор по логу не нужен."))
             db.commit()
             break
@@ -359,7 +385,7 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
             task.status = "waiting_device"
             db.add(ChatMessage(device_pk=d.id, role="assistant", content="Связь с агентом пропала."))
             db.commit()
-            return {"task_id": task.id, "status": task.status, "plan": executed}
+            return {"task_id": task.id, "status": task.status, "plan": executed, "escalated": False}
 
         console = console_of(result)
         exit_code = result.get("exit_code")
@@ -383,12 +409,54 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
         task.plan_json = json.dumps(executed, ensure_ascii=False)
         db.commit()
     else:
-        db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: слишком много шагов. Смотри лог выше."))
-        db.commit()
+        if needs_desktop(text) and not desktop_goal_met(text, history):
+            fail_reason = "не дописал ввод на экране"
+            db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: текст в окно ещё не введён."))
+            db.commit()
+        elif not chat_succeeded(history):
+            fail_reason = "слишком много шагов без результата"
+            db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: слишком много шагов. Смотри лог выше."))
+            db.commit()
+
+    if fail_reason:
+        used_screen = any(s.get("action") == "get_screen" for s in executed)
+        gui = {"ok": False, "executed": [], "reason": fail_reason}
+        if settings.openai_api_key and not used_screen:
+            gui = await run_computer_use(
+                db,
+                device=d,
+                task=task,
+                user_message=text,
+                console_history=history,
+            )
+            executed.extend(gui.get("executed") or [])
+            task.plan_json = json.dumps(executed, ensure_ascii=False)
+            db.commit()
+            if gui.get("ok"):
+                task.status = "done"
+                db.commit()
+                return {"task_id": task.id, "status": "done", "plan": executed, "escalated": False, "gui": True}
+            fail_reason = gui.get("reason") or fail_reason
+        handoff = await escalate_to_grok(
+            db,
+            task=task,
+            device=d,
+            owner_id=owner_id,
+            user_message=text,
+            history=history,
+            reason=fail_reason or "команда завершилась с ошибкой",
+        )
+        return {
+            "task_id": task.id,
+            "status": "escalated",
+            "plan": executed,
+            "escalated": True,
+            "grok": handoff,
+        }
 
     task.status = "done"
     db.commit()
-    return {"task_id": task.id, "status": "done", "plan": executed}
+    return {"task_id": task.id, "status": "done", "plan": executed, "escalated": False}
 
 
 @app.post("/api/devices/{device_id}/chat")
@@ -402,7 +470,36 @@ async def chat(
     text = body.message.strip()
     if not text:
         raise HTTPException(400, "Пустое сообщение")
-    return await run_chat_for_device(db, d, text)
+    return await run_chat_for_device(db, d, text, user.id)
+
+
+@app.get("/api/grok-handoff")
+def grok_handoff(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from .mcp_auth import mcp_connect_url
+
+    key = ensure_mcp_key(db, user.id)
+    pending = (
+        db.query(Escalation)
+        .filter(Escalation.owner_id == user.id, Escalation.status == "pending")
+        .order_by(Escalation.id.desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "mcp_url": mcp_connect_url(key),
+        "grok_connectors": "https://grok.com/connectors",
+        "grok_chat": "https://grok.com",
+        "pending": [
+            {
+                "id": e.id,
+                "device_id": db.get(Device, e.device_pk).device_id if db.get(Device, e.device_pk) else "",
+                "user_message": e.user_message,
+                "reason": e.reason,
+                "context": json.loads(e.context_json or "{}"),
+            }
+            for e in pending
+        ],
+    }
 
 
 def device_for_enroll(db: Session, token: str, device_id: str = "") -> tuple[Enrollment, Device]:

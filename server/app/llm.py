@@ -3,6 +3,7 @@ import re
 
 import httpx
 
+from .computer_use import desktop_goal_met, launch_gui_step, needs_desktop, screen_step
 from .config import settings
 
 ALLOWED_ACTIONS = {
@@ -23,9 +24,10 @@ ALLOWED_ACTIONS = {
     "manage_service",
     "install_windows",
     "partition_disk",
+    "get_screen",
 }
 
-MAX_TURNS = 10
+MAX_TURNS = 12
 CONSOLE_KEEP = 6000
 
 PRODUCT_KEY = re.compile(r"\b(?:[A-Z0-9]{5}-){4}[A-Z0-9]{5}\b", re.I)
@@ -204,6 +206,8 @@ def step_fingerprint(step: dict) -> str:
 
 
 def already_tried(step: dict, history: list[dict]) -> bool:
+    if step.get("action") == "get_screen":
+        return False
     key = step_fingerprint(step)
     return any(step_fingerprint(h) == key for h in history)
 
@@ -266,6 +270,12 @@ def sanitize_step(step: dict | None, user_text: str) -> dict | None:
 
 
 def fallback_plan(text: str, os_name: str) -> list[dict]:
+    if needs_desktop(text):
+        launched = launch_gui_step(text, os_name)
+        if launched:
+            return [launched]
+        return [screen_step()]
+
     if wants_profile_setup(text):
         profile = detect_profile(text)
         fam = family(os_name)
@@ -321,6 +331,8 @@ def fallback_next(text: str, os_name: str, history: list[dict]) -> dict:
     code = last.get("exit_code")
 
     if code == 0:
+        if needs_desktop(text) and not desktop_goal_met(text, history):
+            return {"status": "step", **screen_step()}
         return {"status": "done", "message": "Готово.\n" + (last.get("console") or "")[-2000:]}
 
     if last.get("action") in ("run_powershell", "run_shell") and code != 0:
@@ -377,6 +389,8 @@ async def llm_next(text: str, os_name: str, hardware: dict, history: list[dict])
         decided = await _llm_next_api(text, os_name, hardware, history)
         if decided:
             if decided.get("status") == "done":
+                if needs_desktop(text) and not desktop_goal_met(text, history):
+                    return {"status": "step", **screen_step()}
                 return decided
             step = sanitize_step(decided, text)
             if step and not already_tried(step, history):
@@ -397,7 +411,8 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 {format_history(history)}
 
 Правила:
-- Главный инструмент — {run_action} (params.script): выполняй то, что просит пользователь, обычным языком переводи в команды ОС.
+- Главный инструмент — {run_action} (params.script): команды ОС, запуск программ (Start-Process notepad).
+- Если задаче нужно ОКНО, ввод текста в программу, кнопки, диалоги, рабочий стол — сразу после открытия программы action=get_screen. Не жди ошибок консоли. Не пытайся печатать в GUI через echo в консоль.
 - install_package / uninstall_package — ТОЛЬКО если пользователь явно просит установить/удалить программу одним названием.
 - read_file / write_file / upload_file — для работы с файлами.
 - get_processes / get_services / get_hardware / get_system_info — для информации о системе.
@@ -405,6 +420,7 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 - reboot/shutdown только если пользователь сам просил.
 - Не выдумывай URL для download_file.
 - Один ход = одно действие или status=done с ответом по логу.
+- Не status=done, пока не введён текст в окно, если пользователь просил написать/ввести.
 
 Разрешённые action: {sorted(ALLOWED_ACTIONS)}
 

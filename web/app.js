@@ -171,10 +171,11 @@ $("chat-form").onsubmit = async (ev) => {
     loadMessages().catch(() => {});
   }, 1200);
   try {
-    await api("/api/devices/" + current + "/chat", {
+    const res = await api("/api/devices/" + current + "/chat", {
       method: "POST",
       body: JSON.stringify({ message: text }),
     });
+    if (res.escalated && res.grok) showGrokHandoff(res.grok);
   } catch (e) {
     $("chat-err").textContent = e.message;
   } finally {
@@ -186,6 +187,35 @@ $("chat-form").onsubmit = async (ev) => {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+function showGrokHandoff(grok) {
+  if (!grok) return;
+  let box = document.getElementById("grok-handoff");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "grok-handoff";
+    box.className = "grok-handoff";
+    $("panel").insertBefore(box, $("chat-form"));
+  }
+  const prompt = grok.prompt || grok.grok_prompt || "";
+  box.innerHTML = `
+    <h3>Grok Bot — продолжи задачу</h3>
+    <p class="muted">Локальный бот не справился. Grok управляет этим ПК через MCP (консоль и файлы).</p>
+    <p><b>Причина:</b> ${escapeHtml(grok.reason || "ошибка консоли")}</p>
+    <div class="row">
+      <a class="dl" href="${grok.grok_connectors || "https://grok.com/connectors"}" target="_blank" rel="noopener">Connectors</a>
+      <a class="dl ghost" href="${grok.grok_chat || "https://grok.com"}" target="_blank" rel="noopener">Grok Chat</a>
+      <button type="button" id="copy-mcp">Скопировать MCP URL</button>
+      <button type="button" id="copy-prompt" class="ghost">Скопировать промпт</button>
+    </div>
+    <p class="muted">MCP URL:</p>
+    <pre class="grok-code">${escapeHtml(grok.mcp_url || "")}</pre>
+    <p class="muted">Промпт для Grok:</p>
+    <pre class="grok-code">${escapeHtml(prompt)}</pre>
+  `;
+  box.querySelector("#copy-mcp").onclick = () => navigator.clipboard.writeText(grok.mcp_url || "");
+  box.querySelector("#copy-prompt").onclick = () => navigator.clipboard.writeText(prompt);
 }
 
 $("btn-agent-win").onclick = async () => {

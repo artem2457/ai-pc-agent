@@ -140,3 +140,22 @@ main { padding: 16px; }
 .stick .dl { margin-right: 6px; margin-top: 6px; font-size: 12px; padding: 6px 10px; }
 .fallback { margin-top: 12px; }
 code { background: #12171c; padding: 2px 4px; border-radius: 4px; }
+.grok-handoff {
+  background: #1a2430;
+  border: 1px solid #3b82f6;
+  border-radius: 10px;
+  padding: 14px;
+  margin: 0 0 12px;
+}
+.grok-handoff h3 { margin: 0 0 8px; font-size: 16px; }
+.grok-handoff .grok-code {
+  background: #12171c;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+}
+.grok-handoff .ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }

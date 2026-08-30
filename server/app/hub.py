@@ -7,6 +7,28 @@ from sqlalchemy.orm import Session
 
 from .db import CommandLog, Device, SessionLocal
 
+FAST_ACTIONS = {
+    "get_screen",
+    "click",
+    "type_text",
+    "press_key",
+    "scroll",
+    "open_remote_assistance",
+    "get_hardware",
+    "get_system_info",
+    "get_processes",
+    "get_services",
+    "read_file",
+}
+
+
+def _command_timeout(action: str) -> int:
+    if action in ("download_file", "install_windows"):
+        return 7200
+    if action in FAST_ACTIONS:
+        return 90
+    return 600
+
 
 class Hub:
     def __init__(self):
@@ -63,7 +85,7 @@ class Hub:
             {"type": "command", "id": command_id, "action": action, "params": params or {}}
         )
         try:
-            result = await asyncio.wait_for(fut, timeout=7200 if action in ("download_file", "install_windows") else 600)
+            result = await asyncio.wait_for(fut, timeout=_command_timeout(action))
         except TimeoutError:
             log.status = "timeout"
             db.commit()

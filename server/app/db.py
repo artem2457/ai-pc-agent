@@ -67,6 +67,19 @@ class Task(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class Escalation(Base):
+    __tablename__ = "escalations"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    device_pk = Column(Integer, ForeignKey("devices.id"), nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_message = Column(Text, nullable=False)
+    reason = Column(Text, default="")
+    context_json = Column(Text, default="{}")
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=utcnow)
+
+
 class CommandLog(Base):
     __tablename__ = "command_logs"
     id = Column(Integer, primary_key=True)

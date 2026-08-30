@@ -14,7 +14,28 @@ def test_detect_profile_server():
     assert detect_profile("поставь docker nginx") == "server"
 
 
-def test_fallback_plan_runs_general_command():
+def test_fallback_plan_opens_notepad_for_gui_task():
+    plan = fallback_plan("напиши в блокнот hello", "windows")
+    assert plan[0]["action"] == "run_powershell"
+    assert "notepad" in plan[0]["params"]["script"].lower()
+
+
+def test_fallback_next_screens_after_app_opened():
+    nxt = fallback_next(
+        "напиши в блокнот hello",
+        "windows",
+        [
+            {
+                "title": "Блокнот",
+                "action": "run_powershell",
+                "params": {"script": "Start-Process notepad"},
+                "exit_code": 0,
+                "console": "ok",
+            }
+        ],
+    )
+    assert nxt["status"] == "step"
+    assert nxt["action"] == "get_screen"
     plan = fallback_plan("покажи процессы", "windows")
     assert len(plan) == 1
     assert plan[0]["action"] == "get_processes"
