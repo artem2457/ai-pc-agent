@@ -129,6 +129,10 @@ New-Item -ItemType Directory -Force -Path $root | Out-Null
 Write-Host "Downloading agent from $Url ..."
 Invoke-WebRequest -Uri "$Url/agent.py" -OutFile (Join-Path $root "agent.py") -UseBasicParsing
 
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -match 'AIAgent\\agent\.py' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
 $python = Ensure-Python $root
 
 $configPath = Join-Path $root "config.json"

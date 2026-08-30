@@ -1,3 +1,6 @@
+import re
+
+
 def test_root_serves_ui(client):
     response = client.get("/")
     assert response.status_code == 200
@@ -67,6 +70,10 @@ def test_install_agent_downloads(client):
     sh = client.get("/install-agent.sh", params={"token": enroll})
     assert sh.status_code == 200
     assert enroll.encode() in sh.content
+
+    ver = client.get("/agent/version")
+    assert ver.status_code == 200
+    assert re.match(r"0\.\d+\.\d+", ver.json()["version"])
 
 
 def test_usb_maker_bat_embeds_token(client):

@@ -100,8 +100,8 @@ async function refresh() {
     .map(
       (s) =>
         `<div class="stick">${s.label}<br/>
-        <a class="dl" href="/install-agent.bat?token=${encodeURIComponent(s.token)}" download="install-agent.bat">Windows</a>
-        <a class="dl" href="/install-agent.sh?token=${encodeURIComponent(s.token)}" download="install-agent.sh">Linux</a>
+        <a class="dl" href="/install-agent.bat?token=${encodeURIComponent(s.token)}" download="install-agent.bat">Обновить Windows</a>
+        <a class="dl" href="/install-agent.sh?token=${encodeURIComponent(s.token)}" download="install-agent.sh">Обновить Linux</a>
         <a class="dl" href="/usb-maker.bat?token=${encodeURIComponent(s.token)}" download="usb-maker.bat">USB</a></div>`
     )
     .join("");

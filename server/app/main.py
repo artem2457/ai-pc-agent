@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import re
 import secrets
 import uuid
 import zipfile
@@ -799,6 +800,17 @@ def autounattend():
 @app.get("/agent.py")
 def agent_py():
     return FileResponse(ROOT / "agent" / "agent.py", media_type="text/x-python")
+
+
+def _agent_version() -> str:
+    text = (ROOT / "agent" / "agent.py").read_text(encoding="utf-8")
+    m = re.search(r'^VERSION = "([^"]+)"', text, re.M)
+    return m.group(1) if m else "0.0.0"
+
+
+@app.get("/agent/version")
+def agent_version():
+    return {"version": _agent_version()}
 
 
 @app.get("/install.sh")

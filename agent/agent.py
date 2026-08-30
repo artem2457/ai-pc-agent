@@ -25,7 +25,8 @@ try:
 except ImportError:
     websockets = None
 
-VERSION = "0.2.3"
+VERSION = "0.2.4"
+AGENT_FILE = Path(__file__).resolve()
 ALLOWED = {
     "run_powershell",
     "run_shell",
@@ -51,6 +52,7 @@ ALLOWED = {
     "press_key",
     "scroll",
     "open_remote_assistance",
+    "update_agent",
 }
 
 
@@ -228,6 +230,76 @@ def download_url(url: str, dest: str) -> None:
             if not chunk:
                 break
             f.write(chunk)
+
+
+def version_tuple(v: str) -> tuple[int, ...]:
+    nums = [int(x) for x in re.findall(r"\d+", v or "")]
+    return tuple(nums) if nums else (0,)
+
+
+def read_version_from_source(source: str) -> str | None:
+    m = re.search(r'^VERSION = "([^"]+)"', source, re.M)
+    return m.group(1) if m else None
+
+
+def fetch_json(url: str, timeout: int = 20) -> dict | None:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "AI-PC-Agent"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+            return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _windows_restart_with_update(new_file: Path, new_version: str) -> None:
+    bat = AGENT_FILE.with_name("_agent_update.bat")
+    args_tail = " ".join(f'"{a}"' if " " in a else a for a in sys.argv[1:])
+    py = sys.executable.replace('"', "")
+    script = (
+        "@echo off\r\n"
+        "timeout /t 2 /nobreak >nul\r\n"
+        f'move /y "{new_file}" "{AGENT_FILE}" >nul\r\n'
+        f'start "AI PC Agent" "{py}" "{AGENT_FILE}" {args_tail}\r\n'
+        'del "%~f0"\r\n'
+    )
+    bat.write_text(script, encoding="ascii")
+    flags = 0x00000008 | 0x00000200
+    subprocess.Popen(["cmd", "/c", str(bat)], creationflags=flags, close_fds=True)
+    print(f"[OK] Updating to v{new_version} and restarting...", flush=True)
+    sys.exit(0)
+
+
+def maybe_self_update(http_base: str) -> None:
+    """Download newer agent.py from the server before connecting."""
+    base = (http_base or "").rstrip("/")
+    if not base.startswith("http"):
+        return
+    remote = fetch_json(f"{base}/agent/version")
+    if not remote:
+        return
+    remote_v = str(remote.get("version") or "")
+    if version_tuple(remote_v) <= version_tuple(VERSION):
+        return
+    print(f"[OK] New agent v{remote_v} on server (you have v{VERSION}), downloading...", flush=True)
+    tmp = AGENT_FILE.with_name("agent.py.new")
+    try:
+        download_url(f"{base}/agent.py", str(tmp))
+    except Exception as e:
+        print(f"[WAIT] Auto-update failed: {e}", flush=True)
+        tmp.unlink(missing_ok=True)
+        return
+    text = tmp.read_text(encoding="utf-8", errors="replace")
+    got = read_version_from_source(text)
+    if not got or version_tuple(got) <= version_tuple(VERSION):
+        tmp.unlink(missing_ok=True)
+        print("[WAIT] Downloaded agent is not newer, skip update", flush=True)
+        return
+    if sys.platform == "win32":
+        _windows_restart_with_update(tmp, got)
+    else:
+        tmp.replace(AGENT_FILE)
+        os.execv(sys.executable, [sys.executable, str(AGENT_FILE), *sys.argv[1:]])
 
 
 def run(cmd: list[str] | str, shell=False, timeout=170) -> tuple[int, str, str]:
@@ -1038,6 +1110,15 @@ def handle(action: str, params: dict, os_name: str) -> dict:
     if action == "get_visible_windows":
         code, out, err = get_visible_windows_list(os_name)
         return {"exit_code": code, "stdout": out, "stderr": err, "data": {}}
+    if action == "update_agent":
+        base = str(params.get("server_url") or os.environ.get("AGENT_URL") or "").strip()
+        if not base:
+            cfg = load_config(None)
+            base = str(cfg.get("server_url") or "").strip()
+        if not base:
+            return {"exit_code": 1, "stdout": "", "stderr": "no server_url", "data": {}}
+        maybe_self_update(base)
+        return {"exit_code": 0, "stdout": f"agent already v{VERSION}", "stderr": "", "data": {"version": VERSION}}
     if action == "get_screen":
         return capture_screen()
     if action == "click":
@@ -1305,6 +1386,7 @@ def main():
         ws = "wss://" + base[len("https://") :] + "/ws/agent"
     else:
         ws = base
+    maybe_self_update(base)
     loop_sync(ws, token, args.device_id)
 
 
