@@ -1,11 +1,11 @@
 @echo off
-chcp 65001 >nul
-title AI PC Agent — флешка
+chcp 65001 >nul 2>&1
+title AI PC Agent USB
 cd /d "%~dp0"
 
 net session >nul 2>&1
 if not %errorLevel%==0 (
-  echo Нужны права администратора — подтверди UAC.
+  echo Run as Administrator - confirm UAC.
   powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
   exit /b
 )
