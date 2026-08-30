@@ -445,9 +445,24 @@ def download_usb(token: str, db: Session = Depends(get_db)):
     )
 
 
+def _usb_maker_path(name: str) -> Path:
+    for folder in (
+        ROOT / "usb_maker",
+        Path(__file__).resolve().parent.parent / "usb_maker",
+    ):
+        path = folder / name
+        if path.is_file():
+            return path
+    raise HTTPException(404, f"missing {name}")
+
+
+def _usb_maker_file(name: str) -> FileResponse:
+    return FileResponse(_usb_maker_path(name), media_type="text/plain")
+
+
 @app.get("/usb-maker.ps1")
 def usb_maker_ps_gui():
-    return FileResponse(ROOT / "usb_maker" / "usb_maker.ps1", media_type="text/plain")
+    return _usb_maker_file("usb_maker.ps1")
 
 
 @app.get("/usb-maker.bat")
@@ -486,7 +501,7 @@ def usb_maker_bat():
 
 @app.get("/usb-maker/write_usb.ps1")
 def usb_maker_ps1():
-    return FileResponse(ROOT / "usb_maker" / "write_usb.ps1", media_type="text/plain")
+    return _usb_maker_file("write_usb.ps1")
 
 
 @app.get("/usb-maker.zip")
@@ -494,9 +509,7 @@ def usb_maker_zip():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name in ("usb_maker.ps1", "write_usb.ps1", "start.bat"):
-            p = ROOT / "usb_maker" / name
-            if p.exists():
-                z.write(p, name)
+            z.write(_usb_maker_path(name), name)
     return Response(
         buf.getvalue(),
         media_type="application/zip",
