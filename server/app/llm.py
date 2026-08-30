@@ -153,6 +153,29 @@ def format_history(history: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+def package_name_from_step(step: dict, user_text: str) -> str:
+    params = step.get("params") if isinstance(step.get("params"), dict) else {}
+    for key in ("name", "id", "package", "pkg"):
+        value = str(params.get(key) or "").strip()
+        if value:
+            return value
+    title = str(step.get("title") or "")
+    for prefix in ("Установка ", "Удаление ", "Install ", "Uninstall "):
+        if title.startswith(prefix) and title[len(prefix) :].strip():
+            return title[len(prefix) :].strip()
+    return extract_target(user_text)
+
+
+def step_fingerprint(step: dict) -> str:
+    params = step.get("params") if isinstance(step.get("params"), dict) else {}
+    return json.dumps({"action": step.get("action"), "params": params}, ensure_ascii=False, sort_keys=True)
+
+
+def already_tried(step: dict, history: list[dict]) -> bool:
+    key = step_fingerprint(step)
+    return any(step_fingerprint(h) == key for h in history)
+
+
 def sanitize_step(step: dict | None, user_text: str) -> dict | None:
     if not step or not isinstance(step, dict):
         return None
@@ -161,11 +184,16 @@ def sanitize_step(step: dict | None, user_text: str) -> dict | None:
         return None
     if action in ("reboot", "shutdown") and not wants_power_cycle(user_text):
         return None
-    params = step.get("params") if isinstance(step.get("params"), dict) else {}
+    params = dict(step.get("params") if isinstance(step.get("params"), dict) else {})
     if action == "download_file":
         url = str(params.get("url") or "")
         if not url.startswith("http://") and not url.startswith("https://"):
             return None
+    if action in ("install_package", "uninstall_package"):
+        name = package_name_from_step({"params": params, "title": step.get("title")}, user_text)
+        if not name:
+            return None
+        params["name"] = name
     return {
         "title": str(step.get("title") or action)[:120],
         "action": action,
@@ -265,13 +293,12 @@ def fallback_next(text: str, os_name: str, history: list[dict]) -> dict:
                     return {"status": "step", **step}
         return {"status": "done", "message": "Готово. Последняя команда завершилась успешно."}
 
-    tried = {h.get("action") for h in history}
-    if last.get("action") == "download_file" or "404" in console:
+    if last.get("action") == "download_file" or "404" in console or "empty package name" in console:
         step = sanitize_step(
             {"title": f"Установка через пакетный менеджер: {target}", "action": "install_package", "params": {"name": target}},
             text,
         )
-        if step and "install_package" not in tried:
+        if step and not already_tried(step, history):
             return {"status": "step", **step}
 
     if fam == "windows" and any(x in console for x in ("msstore", "0x8a150044", "rest api", "источнике")):
@@ -287,7 +314,7 @@ def fallback_next(text: str, os_name: str, history: list[dict]) -> dict:
     if last.get("action") == "install_package" and fam == "windows":
         script = f"winget search {target} --source winget --disable-interactivity"
         step = sanitize_step({"title": "Поиск пакета в winget по выводу ошибки", "action": "run_powershell", "params": {"script": script}}, text)
-        if step and not any(h.get("title", "").startswith("Поиск пакета") for h in history):
+        if step and not already_tried(step, history):
             return {"status": "step", **step}
 
     return {
@@ -303,7 +330,7 @@ async def llm_next(text: str, os_name: str, hardware: dict, history: list[dict])
             if decided.get("status") == "done":
                 return decided
             step = sanitize_step(decided, text)
-            if step:
+            if step and not already_tried(step, history):
                 return {"status": "step", **step}
     return fallback_next(text, os_name, history)
 
@@ -325,7 +352,8 @@ async def _llm_next_api(text: str, os_name: str, hardware: dict, history: list[d
 - Один ход = одно действие, либо завершение.
 - reboot/shutdown ЗАПРЕЩЕНЫ, если пользователь сам не просил перезагрузку или выключение.
 - Не выдумывай URL. Для программ используй install_package / uninstall_package (Windows = winget, Linux = apt).
-- Имя пакета бери из запроса пользователя. Работает для ЛЮБОГО приложения, не только известных.
+- Имя пакета бери из запроса пользователя. Для install_package и uninstall_package params ОБЯЗАНЫ содержать "name": "<имя из запроса>". Без name команда падает.
+- Не повторяй шаг, который уже есть в журнале с тем же action и теми же params. Если он упал — смени команду.
 - download_file только с реальным http(s) URL из задачи или из лога, не с выдуманного.
 - Если задача уже сделана по логу — status=done и кратко опиши результат по логу.
 

@@ -28,7 +28,7 @@ from .db import (
     init_db,
 )
 from .hub import hub
-from .llm import MAX_TURNS, console_of, llm_next
+from .llm import MAX_TURNS, already_tried, console_of, llm_next
 from .mcp import GROK_INSTRUCTIONS, handle_rpc, user_for_key
 from .mcp_auth import ensure_mcp_key, mcp_connect_url, mcp_public_url
 
@@ -343,7 +343,15 @@ async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
             break
 
         step = {"title": decision["title"], "action": decision["action"], "params": decision.get("params") or {}}
-        db.add(ChatMessage(device_pk=d.id, role="assistant", content=f"→ {step['title']}"))
+        if already_tried(step, history):
+            db.add(ChatMessage(device_pk=d.id, role="assistant", content="Остановился: этот шаг уже был, повтор по логу не нужен."))
+            db.commit()
+            break
+        pkg = (step.get("params") or {}).get("name")
+        arrow = f"→ {step['title']}"
+        if pkg:
+            arrow += f"  [{pkg}]"
+        db.add(ChatMessage(device_pk=d.id, role="assistant", content=arrow))
         db.commit()
         try:
             result = await hub.send_command(db, d, step["action"], step.get("params") or {}, task_id=task.id)

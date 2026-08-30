@@ -70,3 +70,32 @@ def test_fallback_next_retries_msstore_error_from_log():
 def test_extract_target_generic():
     assert "SuperApp" in extract_target("установи SuperApp")
     assert "Foo Bar" in extract_target("деинсталлируй Foo Bar")
+
+
+def test_sanitize_fills_empty_package_name():
+    step = sanitize_step(
+        {"title": "Установка Notepad++", "action": "install_package", "params": {}},
+        "установи notepad++",
+    )
+    assert step is not None
+    assert step["params"]["name"]
+    assert "notepad" in step["params"]["name"].lower()
+
+
+def test_fallback_next_retries_empty_package_name():
+    nxt = fallback_next(
+        "установи SuperApp",
+        "windows",
+        [
+            {
+                "title": "Установка SuperApp",
+                "action": "install_package",
+                "params": {},
+                "exit_code": 1,
+                "console": "empty package name",
+            }
+        ],
+    )
+    assert nxt["status"] == "step"
+    assert nxt["action"] == "install_package"
+    assert nxt["params"]["name"] == "SuperApp"
