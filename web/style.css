@@ -99,15 +99,43 @@ main { padding: 16px; }
   background: #12171c;
   border-radius: 8px;
   padding: 12px;
-  min-height: 120px;
-  max-height: 30vh;
+  min-height: 180px;
+  max-height: 42vh;
   overflow: auto;
   margin: 12px 0;
-  white-space: pre-wrap;
 }
-.msg { margin: 8px 0; }
-.msg.user { color: #9ec1ff; }
-.msg.assistant { color: #d7e3c0; }
+.msg { margin: 10px 0; }
+.msg b { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.msg pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 14px;
+}
+.msg.user pre { color: #9ec1ff; }
+.msg.assistant pre { color: #d7e3c0; }
+.chat-form { align-items: stretch; margin: 0 0 16px; }
+.chat-form input { flex: 1; min-width: 0; margin: 0; }
+.pc-chat {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.pc-chat header { flex: 0 0 auto; }
+.pc-chat main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 820px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 16px;
+}
+.pc-chat #chat {
+  flex: 1;
+  max-height: none;
+  min-height: 240px;
+}
 .stick { font-size: 13px; margin-top: 10px; word-break: break-all; }
 .stick .dl { margin-right: 6px; margin-top: 6px; font-size: 12px; padding: 6px 10px; }
 .fallback { margin-top: 12px; }

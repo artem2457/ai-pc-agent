@@ -72,5 +72,9 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now ai-pc-agent
+CHAT="${URL%/}/pc-chat?token=${TOKEN}&device=${DEVICE_ID}"
 echo "Agent started. Device: $DEVICE_ID"
-echo "Check the website - PC should appear online in a few seconds."
+echo "Chat: $CHAT"
+if command -v xdg-open >/dev/null 2>&1 && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+  xdg-open "$CHAT" >/dev/null 2>&1 || true
+fi

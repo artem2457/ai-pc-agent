@@ -2,6 +2,17 @@ def test_root_serves_ui(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
+    assert b"chat-in" in response.content
+    assert b"btn-send" in response.content
+
+
+def test_pc_chat_page(client):
+    page = client.get("/pc-chat")
+    assert page.status_code == 200
+    assert b"pc-chat.js" in page.content
+    js = client.get("/static/pc-chat.js")
+    assert js.status_code == 200
+    assert b"/api/pc/session" in js.content
 
 
 def test_register_and_login(client):
@@ -78,3 +89,57 @@ def test_mcp_rejects_invalid_key(client):
         headers={"Authorization": "Bearer invalid"},
     )
     assert response.status_code == 401
+
+
+def test_pc_session_needs_valid_token(client):
+    bad = client.post("/api/pc/session", json={"token": "NOPE", "device_id": "PC"})
+    assert bad.status_code == 401
+
+
+def test_pc_session_and_chat(client):
+    from app.db import Device, SessionLocal
+
+    client.post("/api/register", json={"email": "pcchat@example.com", "password": "test-password-123"})
+    login = client.post("/api/login", json={"email": "pcchat@example.com", "password": "test-password-123"})
+    auth = {"Authorization": "Bearer " + login.json()["token"]}
+    stick = client.post("/api/sticks", json={"label": "PC"}, headers=auth)
+    enroll = stick.json()["token"]
+
+    missing = client.post("/api/pc/session", json={"token": enroll, "device_id": "LAPTOP-TEST"})
+    assert missing.status_code == 404
+
+    me = client.get("/api/me", headers=auth).json()
+    db = SessionLocal()
+    try:
+        db.add(
+            Device(
+                owner_id=me["id"],
+                device_id="LAPTOP-TEST",
+                hostname="LAPTOP-TEST",
+                os="windows",
+                hardware="{}",
+                status="offline",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    session = client.post("/api/pc/session", json={"token": enroll, "device_id": "LAPTOP-TEST"})
+    assert session.status_code == 200
+    body = session.json()
+    assert body["device_id"] == "LAPTOP-TEST"
+    assert body["token"]
+
+    chat = client.post(
+        "/api/devices/LAPTOP-TEST/chat",
+        json={"message": "покажи железо"},
+        headers={"Authorization": "Bearer " + body["token"]},
+    )
+    assert chat.status_code == 200
+    assert chat.json()["status"] in ("done", "waiting_device")
+    messages = client.get("/api/devices/LAPTOP-TEST/messages", headers=auth)
+    assert messages.status_code == 200
+    roles = [m["role"] for m in messages.json()]
+    assert "user" in roles
+    assert "assistant" in roles

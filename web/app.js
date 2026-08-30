@@ -117,12 +117,34 @@ async function openDevice(id) {
   refresh();
 }
 
+function renderMessages(messages) {
+  const box = $("chat");
+  if (!messages.length) {
+    box.innerHTML = "<p class='muted'>Напиши задачу боту — он выполнит её на этом ПК.</p>";
+    return;
+  }
+  box.innerHTML = messages
+    .map(
+      (m) =>
+        `<div class="msg ${m.role}"><b>${m.role === "user" ? "Ты" : "Бот"}</b><pre>${escapeHtml(m.content || "")}</pre></div>`
+    )
+    .join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+async function loadMessages() {
+  if (!current) return;
+  const messages = await api("/api/devices/" + current + "/messages");
+  renderMessages(messages);
+}
+
 async function loadDevice() {
   if (!current) return;
   const d = await api("/api/devices/" + current);
-  $("dev-title").textContent = `${d.status === "online" ? "🟢" : "🔴"} ${d.hostname || d.device_id}`;
+  $("dev-title").textContent = `${d.status === "online" ? "онлайн" : "офлайн"} · ${d.hostname || d.device_id}`;
   const hw = d.hardware || {};
   $("dev-meta").textContent = `${d.os} · CPU ${hw.cpu || "?"} · RAM ${hw.ram_gb || "?"} GB`;
+  await loadMessages();
   const logs = await api("/api/devices/" + current + "/logs");
   $("logs").innerHTML = logs.length
     ? logs
@@ -134,8 +156,33 @@ async function loadDevice() {
             </div>`
         )
         .join("")
-    : "<p class='muted'>Пока пусто. Открой Grok и попроси что-то установить на этом ПК.</p>";
+    : "<p class='muted'>Пока нет выполненных команд.</p>";
 }
+
+$("chat-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  if (!current) return;
+  const text = $("chat-in").value.trim();
+  if (!text) return;
+  $("chat-err").textContent = "";
+  $("chat-in").value = "";
+  $("btn-send").disabled = true;
+  const poller = setInterval(() => {
+    loadMessages().catch(() => {});
+  }, 1200);
+  try {
+    await api("/api/devices/" + current + "/chat", {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+  } catch (e) {
+    $("chat-err").textContent = e.message;
+  } finally {
+    clearInterval(poller);
+    $("btn-send").disabled = false;
+    await loadDevice();
+  }
+};
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));

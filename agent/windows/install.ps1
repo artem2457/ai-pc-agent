@@ -138,6 +138,7 @@ $configJson = (@{ server_url = $Url.TrimEnd("/"); token = $Token } | ConvertTo-J
 $config = $configPath
 $agent = Join-Path $root "agent.py"
 $taskArgs = "`"$agent`" --config `"$config`" --device-id $DeviceId"
+$chatUrl = "$($Url.TrimEnd('/'))/pc-chat?token=$([uri]::EscapeDataString($Token))&device=$([uri]::EscapeDataString($DeviceId))"
 
 $action = New-ScheduledTaskAction -Execute $python -Argument $taskArgs
 $trigger = New-ScheduledTaskTrigger -AtLogOn
@@ -147,7 +148,15 @@ try {
 } catch {}
 Register-ScheduledTask -TaskName "AI-PC-Agent" -Action $action -Trigger @($trigger, $boot) -RunLevel Highest -Force | Out-Null
 Start-Process -FilePath $python -ArgumentList $agent, "--config", $config, "--device-id", $DeviceId
+
+$desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+if (-not $desktop) { $desktop = [Environment]::GetFolderPath("Desktop") }
+try {
+  $urlFile = Join-Path $desktop "AI PC Chat.url"
+  "[InternetShortcut]`r`nURL=$chatUrl`r`n" | Set-Content -Path $urlFile -Encoding ASCII
+} catch {}
+Start-Process $chatUrl
 Write-Host "Agent installed and started. Device: $DeviceId"
-Write-Host "Check the website - PC should appear online in a few seconds."
+Write-Host "Chat: $chatUrl"
 Write-Host "Press any key to close..."
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

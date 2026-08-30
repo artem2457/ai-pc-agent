@@ -14,7 +14,9 @@ import struct
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 try:
@@ -431,6 +433,41 @@ def register_payload(token: str, device_id: str, os_name: str, hw: dict) -> dict
     }
 
 
+_chat_opened = False
+
+
+def http_base_from_ws(ws_url: str) -> str:
+    if ws_url.startswith("wss://"):
+        return "https://" + ws_url[len("wss://") :].split("/ws/", 1)[0]
+    if ws_url.startswith("ws://"):
+        return "http://" + ws_url[len("ws://") :].split("/ws/", 1)[0]
+    return ws_url.rstrip("/")
+
+
+def open_pc_chat(http_url: str, token: str, device_id: str):
+    global _chat_opened
+    if _chat_opened or not http_url or not token:
+        return
+    _chat_opened = True
+    q = urllib.parse.urlencode({"token": token, "device": device_id})
+    chat_url = f"{http_url.rstrip('/')}/pc-chat?{q}"
+    print(f"[OK] Chat: {chat_url}", flush=True)
+    try:
+        if webbrowser.open(chat_url, new=1):
+            return
+    except Exception:
+        pass
+    try:
+        if sys.platform == "win32":
+            os.startfile(chat_url)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", chat_url])
+        elif os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            subprocess.Popen(["xdg-open", chat_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def loop_websockets(url: str, token: str, device_id: str, os_name: str, hw: dict):
     import asyncio
 
@@ -438,6 +475,7 @@ def loop_websockets(url: str, token: str, device_id: str, os_name: str, hw: dict
         await ws.send(json.dumps(register_payload(token, device_id, os_name, hw)))
         ack = json.loads(await ws.recv())
         ok(f"Server connected ({ack.get('device_id', device_id)})")
+        open_pc_chat(http_base_from_ws(url), token, ack.get("device_id", device_id))
         async for raw in ws:
             msg = json.loads(raw)
             if msg.get("type") != "command":
@@ -477,6 +515,7 @@ def loop_miniws(url: str, token: str, device_id: str, os_name: str, hw: dict):
             ws.send(json.dumps(register_payload(token, device_id, os_name, hw)))
             ack = json.loads(ws.recv())
             ok(f"Server connected ({ack.get('device_id', device_id)})")
+            open_pc_chat(http_base_from_ws(url), token, ack.get("device_id", device_id))
             while True:
                 msg = json.loads(ws.recv())
                 if msg.get("type") != "command":

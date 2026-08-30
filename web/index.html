@@ -9,7 +9,7 @@
 <body>
   <div id="auth" class="card wrap">
     <h1>AI PC Agent</h1>
-    <p class="muted">Подключи ПК и управляй им через <a href="https://grok.com" target="_blank">Grok Bot</a>.</p>
+    <p class="muted">Подключи ПК — на нём откроется чат, в котором ты даёшь команды боту.</p>
     <input id="email" placeholder="email" />
     <input id="password" type="password" placeholder="пароль" />
     <div class="row">
@@ -23,7 +23,7 @@
     <header>
       <strong>AI PC Agent</strong>
       <span id="who" class="muted"></span>
-      <a class="dl" href="https://grok.com" target="_blank">Open Grok</a>
+      <span class="muted">Чат на этом сайте или на самом ПК</span>
       <button id="btn-out" class="ghost">Выйти</button>
     </header>
 
@@ -40,10 +40,16 @@
         <div id="sticks"></div>
       </aside>
       <main>
-        <div id="empty" class="muted">Выбери устройство — здесь лог команд от Grok</div>
+        <div id="empty" class="muted">Выбери устройство слева — здесь чат с ботом. На ПК с агентом чат открывается сам.</div>
         <div id="panel" class="hidden">
           <h2 id="dev-title"></h2>
           <p id="dev-meta" class="muted"></p>
+          <div id="chat"></div>
+          <form id="chat-form" class="row chat-form">
+            <input id="chat-in" autocomplete="off" placeholder="Что сделать на этом ПК? Например: установи Chrome" />
+            <button id="btn-send" type="submit">Отправить</button>
+          </form>
+          <p id="chat-err" class="err"></p>
           <h3>Лог команд</h3>
           <div id="logs"></div>
         </div>

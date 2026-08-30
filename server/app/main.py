@@ -75,6 +75,11 @@ class StickIn(BaseModel):
     label: str = "USB Agent"
 
 
+class PcSessionIn(BaseModel):
+    token: str
+    device_id: str = ""
+
+
 def device_out(d: Device):
     try:
         hardware = json.loads(d.hardware or "{}")
@@ -307,20 +312,13 @@ async def send_command(
     return result
 
 
-@app.post("/api/devices/{device_id}/chat")
-async def chat(
-    device_id: str,
-    body: ChatIn,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    d = owned_device(db, user, device_id)
-    text = body.message.strip()
-    if not text:
-        raise HTTPException(400, "Пустое сообщение")
+async def run_chat_for_device(db: Session, d: Device, text: str) -> dict:
     db.add(ChatMessage(device_pk=d.id, role="user", content=text))
     db.commit()
-    hardware = json.loads(d.hardware or "{}")
+    try:
+        hardware = json.loads(d.hardware or "{}")
+    except json.JSONDecodeError:
+        hardware = {}
     steps = await llm_plan(text, d.os or "linux", hardware)
     task = Task(device_pk=d.id, user_message=text, status="running", plan_json=json.dumps(steps, ensure_ascii=False))
     db.add(task)
@@ -373,6 +371,51 @@ async def chat(
     db.add(ChatMessage(device_pk=d.id, role="assistant", content="Готово."))
     db.commit()
     return {"task_id": task.id, "status": "done", "plan": steps}
+
+
+@app.post("/api/devices/{device_id}/chat")
+async def chat(
+    device_id: str,
+    body: ChatIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    d = owned_device(db, user, device_id)
+    text = body.message.strip()
+    if not text:
+        raise HTTPException(400, "Пустое сообщение")
+    return await run_chat_for_device(db, d, text)
+
+
+def device_for_enroll(db: Session, token: str, device_id: str = "") -> tuple[Enrollment, Device]:
+    enroll = db.query(Enrollment).filter(Enrollment.token == token.strip()).first()
+    if not enroll:
+        raise HTTPException(401, "Неверный токен агента")
+    q = db.query(Device).filter(Device.owner_id == enroll.owner_id)
+    device = None
+    if device_id.strip():
+        device = q.filter(Device.device_id == device_id.strip()).first()
+    if not device:
+        device = q.order_by(Device.id.desc()).first()
+    if not device:
+        raise HTTPException(404, "ПК ещё не подключился. Подожди [OK] Server connected и обнови страницу.")
+    return enroll, device
+
+
+@app.post("/api/pc/session")
+def pc_session(body: PcSessionIn, db: Session = Depends(get_db)):
+    enroll, device = device_for_enroll(db, body.token, body.device_id)
+    user = db.get(User, enroll.owner_id)
+    if not user:
+        raise HTTPException(401, "Владелец не найден")
+    return {
+        "token": make_token(user.id),
+        "email": user.email,
+        "device_id": device.device_id,
+        "hostname": device.hostname or device.device_id,
+        "os": device.os,
+        "status": "online" if hub.is_online(device.device_id) else "offline",
+    }
 
 
 @app.post("/api/sticks")
@@ -715,6 +758,11 @@ async def agent_ws(ws: WebSocket, db: Session = Depends(get_db)):
 @app.get("/")
 def index():
     return FileResponse(WEB / "index.html")
+
+
+@app.get("/pc-chat")
+def pc_chat_page():
+    return FileResponse(WEB / "pc-chat.html")
 
 
 if WEB.exists():
