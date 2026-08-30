@@ -64,6 +64,22 @@ $("btn-out").onclick = () => {
   showAuth();
 };
 
+function downloadFile(url, name) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function createEnrollment() {
+  return api("/api/sticks", {
+    method: "POST",
+    body: JSON.stringify({ label: $("stick-label").value || "PC Agent" }),
+  });
+}
+
 async function refresh() {
   const devices = await api("/api/devices");
   $("devices").innerHTML = devices
@@ -75,7 +91,7 @@ async function refresh() {
           <span class="muted">${d.os} · ${d.status}</span>
         </div>`
     )
-    .join("") || "<p class='muted'>Нет устройств. Скачай программу флешки и запусти её.</p>";
+    .join("") || "<p class='muted'>Нет устройств. Скачай агент или флешку.</p>";
   $("devices").querySelectorAll(".device").forEach((el) => {
     el.onclick = () => openDevice(el.dataset.id);
   });
@@ -84,7 +100,9 @@ async function refresh() {
     .map(
       (s) =>
         `<div class="stick">${s.label}<br/>
-        <a class="dl" href="/usb-maker.bat?token=${encodeURIComponent(s.token)}" download="usb-maker.bat">Скачать снова</a></div>`
+        <a class="dl" href="/install-agent.bat?token=${encodeURIComponent(s.token)}" download="install-agent.bat">Windows</a>
+        <a class="dl" href="/install-agent.sh?token=${encodeURIComponent(s.token)}" download="install-agent.sh">Linux</a>
+        <a class="dl" href="/usb-maker.bat?token=${encodeURIComponent(s.token)}" download="usb-maker.bat">USB</a></div>`
     )
     .join("");
 }
@@ -123,17 +141,21 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
 
+$("btn-agent-win").onclick = async () => {
+  const s = await createEnrollment();
+  downloadFile("/install-agent.bat?token=" + encodeURIComponent(s.token), "install-agent.bat");
+  refresh();
+};
+
+$("btn-agent-linux").onclick = async () => {
+  const s = await createEnrollment();
+  downloadFile("/install-agent.sh?token=" + encodeURIComponent(s.token), "install-agent.sh");
+  refresh();
+};
+
 $("btn-stick").onclick = async () => {
-  const s = await api("/api/sticks", {
-    method: "POST",
-    body: JSON.stringify({ label: $("stick-label").value || "USB Agent" }),
-  });
-  const a = document.createElement("a");
-  a.href = "/usb-maker.bat?token=" + encodeURIComponent(s.token);
-  a.download = "usb-maker.bat";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const s = await createEnrollment();
+  downloadFile("/usb-maker.bat?token=" + encodeURIComponent(s.token), "usb-maker.bat");
   refresh();
 };
 

@@ -39,6 +39,25 @@ def test_usb_maker_scripts(client):
     assert b"@echo off" in bat.content
 
 
+def test_install_agent_downloads(client):
+    client.post("/api/register", json={"email": "agent@example.com", "password": "test-password-123"})
+    login = client.post("/api/login", json={"email": "agent@example.com", "password": "test-password-123"})
+    auth = {"Authorization": "Bearer " + login.json()["token"]}
+    stick = client.post("/api/sticks", json={"label": "PC"}, headers=auth)
+    enroll = stick.json()["token"]
+    assert stick.json()["agent_windows"].endswith(f"token={enroll}")
+
+    bat = client.get("/install-agent.bat", params={"token": enroll})
+    assert bat.status_code == 200
+    text = bat.content.decode("ascii")
+    assert f"TOKEN={enroll}" in text
+    assert "/install.ps1" in text
+
+    sh = client.get("/install-agent.sh", params={"token": enroll})
+    assert sh.status_code == 200
+    assert enroll.encode() in sh.content
+
+
 def test_usb_maker_bat_embeds_token(client):
     client.post("/api/register", json={"email": "usb@example.com", "password": "test-password-123"})
     login = client.post("/api/login", json={"email": "usb@example.com", "password": "test-password-123"})

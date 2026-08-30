@@ -38,6 +38,20 @@ Connector настраивается **один раз** администрат�
 
 Инструменты: `list_devices`, `execute_command`, `get_hardware`, … — JSON ответ, не скриншот.
 
+## Агент на ПК с уже установленной ОС
+
+Токен уже внутри скачанного файла — вводить ничего не нужно.
+
+**Windows** — с сайта «Агент для Windows», запусти `install-agent.bat` **от администратора**. Python не нужен — скачается сам.
+
+**Linux** — «Агент для Linux», на сервере:
+
+```bash
+sudo bash install-agent.sh
+```
+
+Агент ставится в автозагрузку (Windows: задача планировщика, Linux: systemd). ПК появится на сайте через несколько секунд.
+
 ## Флешка для пустого ПК (Alpine Linux, open source)
 
 WinRE / Windows **не нужны**. Программа записывает **Alpine Linux** (~400 MB) — хватит флешки **512 MB+**.
@@ -50,14 +64,14 @@ WinRE / Windows **не нужны**. Программа записывает **A
 
 Лицензия: Alpine Linux — MIT/GPL, без проприетарного Windows.
 
-## Агент на этой Windows-машине (уже есть ОС)
+## Агент вручную (без bat/sh)
 
 ```
 python -m pip install -r agent/requirements.txt
 python agent/agent.py --url http://localhost:8000 --token ТВОЙ_ТОКЕН
 ```
 
-Служба при старте:
+Windows служба:
 
 ```
 powershell -ExecutionPolicy Bypass -File agent\windows\install.ps1 -Token ТВОЙ_ТОКЕН -Url http://localhost:8000

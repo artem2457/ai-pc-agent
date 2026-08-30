@@ -386,6 +386,9 @@ def create_stick(body: StickIn, user: User = Depends(current_user), db: Session 
         "id": enroll.id,
         "token": token,
         "label": enroll.label,
+        "agent_windows": f"{settings.public_url.rstrip('/')}/install-agent.bat?token={token}",
+        "agent_linux": f"{settings.public_url.rstrip('/')}/install-agent.sh?token={token}",
+        "usb_maker": f"{settings.public_url.rstrip('/')}/usb-maker.bat?token={token}",
         "install_linux": f"curl -fsSL {settings.public_url}/install.sh | bash -s -- --token {token} --url {settings.public_url}",
         "install_windows": f"powershell -ExecutionPolicy Bypass -File install.ps1 -Token {token} -Url {settings.public_url}",
         "pair_code": token[-6:],
@@ -499,6 +502,72 @@ def _usb_maker_bat_body(token: str = "") -> bytes:
         "if errorlevel 1 pause\r\n"
     )
     return body.encode("ascii")
+
+
+def _clean_enroll_token(token: str) -> str:
+    return "".join(c for c in (token or "") if c.isalnum())
+
+
+def _install_agent_bat_body(token: str = "") -> bytes:
+    url = settings.public_url.rstrip("/")
+    token = _clean_enroll_token(token)
+    body = (
+        "@echo off\r\n"
+        "chcp 65001 >nul 2>&1\r\n"
+        "title AI PC Agent\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        "\r\n"
+        "net session >nul 2>&1\r\n"
+        "if not %errorLevel%==0 (\r\n"
+        "  echo Run as Administrator - confirm UAC.\r\n"
+        "  powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
+        "  exit /b\r\n"
+        ")\r\n"
+        f"set \"SERVER={url}\"\r\n"
+        f"set \"TOKEN={token}\"\r\n"
+        "set \"PS=%TEMP%\\ai-pc-install.ps1\"\r\n"
+        "echo Installing agent from %SERVER% ...\r\n"
+        "powershell -NoProfile -Command \"Invoke-WebRequest -UseBasicParsing '%SERVER%/install.ps1' -OutFile '%TEMP%\\ai-pc-install.ps1'\"\r\n"
+        "if not exist \"%PS%\" (\r\n"
+        "  echo Download failed. Check server: %SERVER%\r\n"
+        "  pause\r\n"
+        "  exit /b 1\r\n"
+        ")\r\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -File \"%PS%\" -Token \"%TOKEN%\" -Url \"%SERVER%\"\r\n"
+        "if errorlevel 1 pause\r\n"
+    )
+    return body.encode("ascii")
+
+
+def _install_agent_sh_body(token: str = "") -> bytes:
+    url = settings.public_url.rstrip("/")
+    token = _clean_enroll_token(token)
+    body = (
+        "#!/usr/bin/env bash\r\n"
+        "set -euo pipefail\r\n"
+        f'SERVER="{url}"\r\n'
+        f'TOKEN="{token}"\r\n'
+        'curl -fsSL "$SERVER/install.sh" | bash -s -- --token "$TOKEN" --url "$SERVER"\r\n'
+    )
+    return body.encode("ascii")
+
+
+@app.get("/install-agent.bat")
+def install_agent_bat(token: str = Query("")):
+    return Response(
+        _install_agent_bat_body(token),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=install-agent.bat"},
+    )
+
+
+@app.get("/install-agent.sh")
+def install_agent_sh(token: str = Query("")):
+    return Response(
+        _install_agent_sh_body(token),
+        media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=install-agent.sh"},
+    )
 
 
 @app.get("/usb-maker.ps1")
